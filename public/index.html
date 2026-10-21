@@ -1610,21 +1610,26 @@ async function fetchJson(view){
 // Shape-adapters: convert what the API returns (snake_case fields from SQL)
 // into the exact CSV-row shape the existing coercion code expects.
 // This way we didn't rewrite the dashboard, just the loader.
-function salesRowFromApi(row){
+function salesRowFromApi(row, studioByErp){
+  // Slim API shape: p=project_no, e=erp_code, d=pko_date, a=amount, q=qty.
+  // Everything else (brand, category, product name) comes from the studio
+  // catalog, which the dashboard already loads separately, keyed by ERP code.
+  const erp = row.e || '';
+  const studio = studioByErp.get(erp) || {};
   return {
-    'Project No':       row.project_no,
-    'PKO Date':         row.pko_date ? new Date(row.pko_date).toLocaleDateString('en-GB').replace(/\//g,'-') : '',
-    'Branch':           row.branch || '',  // backfilled from projects pull
-    'ERP Code':         row.erp_code || '',
-    'Qty':              row.qty || 0,
-    'Amount':           row.amount || 0,
-    'Item Name':        row.product_name || '',
-    'Product Name':     row.product_name || '',
-    'Category':         row.category || '',
-    'Brand':            row.brand || '',
-    'Default Category': row.default_category || '',
-    'Project Value':    row.project_value || 0,     // backfilled from projects pull
-    'Project Type':     row.project_type_label || '',  // backfilled, mapped to Turnkey/Sub/Stylist
+    'Project No':       row.p,
+    'PKO Date':         row.d ? new Date(row.d).toLocaleDateString('en-GB').replace(/\//g,'-') : '',
+    'Branch':           row._branch || '',          // backfilled from Postgres projects pull
+    'ERP Code':         erp,
+    'Qty':              row.q || 0,
+    'Amount':           row.a || 0,
+    'Item Name':        studio.product_name || '',
+    'Product Name':     studio.product_name || '',
+    'Category':         studio.category || '',
+    'Brand':            studio.brand || '',
+    'Default Category': studio.default_category || '',
+    'Project Value':    row._project_value || 0,    // backfilled from Postgres
+    'Project Type':     row._project_type_label || '', // backfilled from Postgres
   };
 }
 function studioRowFromApi(row){
@@ -1649,32 +1654,44 @@ function studioRowFromApi(row){
 // 1=Turnkey, 5=Sub-project, 8=Stylist (confirmed by distinct-value query)
 const PROJECT_TYPE_LABELS = { 1:'Turnkey', 5:'Sub', 8:'Stylist', 0:'Other', 2:'Other', 4:'Other' };
 
+// Studio catalog is loaded once and used both as its own dataset AND as a
+// lookup for sales rows. STATE.studioRaw holds the raw API response so we
+// can key by ERP for the sales merge.
 async function loadSalesFiles(){
-  // 1. Pull the two heavy views from ClickHouse in parallel with the Postgres meta
-  const [salesApi, projectsApi] = await Promise.all([
+  // 1. Pull sales + Postgres meta in parallel. Studio is loaded separately
+  //    in init() but we need it HERE to backfill names onto sales. So wait
+  //    for it via STATE._studioReady.
+  const [salesApi, projectsApi, studioApi] = await Promise.all([
     fetchJson('sales'),
     fetchJson('projects'),
+    STATE._studioReady,  // kicked off in init()
   ]);
-  // 2. Build a quick lookup: project_no -> {project_value, project_type_label, branch}
+  // 2. Build project_no -> meta lookup
   const metaByPno = new Map();
   for(const p of projectsApi){
     metaByPno.set(String(p.project_no), {
-      project_value: p.project_value || 0,
-      project_type_label: PROJECT_TYPE_LABELS[p.project_type] || 'Other',
-      branch: p.branch || '',
+      _project_value: p.project_value || 0,
+      _project_type_label: PROJECT_TYPE_LABELS[p.project_type] || 'Other',
+      _branch: p.branch || '',
     });
   }
-  // 3. Merge meta into each sales row, then convert to CSV-shape
-  const merged = salesApi.map(r => {
-    const meta = metaByPno.get(String(r.project_no));
+  // 3. Build ERP -> studio lookup for brand/category/product_name backfill
+  const studioByErp = new Map();
+  for(const s of studioApi){
+    if(s.erp_code) studioByErp.set(s.erp_code, s);
+  }
+  // 4. Merge meta into each sales row, then convert to CSV-shape
+  const merged = [];
+  for(const r of salesApi){
+    const meta = metaByPno.get(String(r.p));
     if(meta){
-      r.project_value = meta.project_value;
-      r.project_type_label = meta.project_type_label;
-      r.branch = meta.branch;
+      r._project_value = meta._project_value;
+      r._project_type_label = meta._project_type_label;
+      r._branch = meta._branch;
     }
-    return salesRowFromApi(r);
-  });
-  console.log(`[PKO] Loaded ${salesApi.length} sales rows, ${projectsApi.length} project meta rows from API`);
+    merged.push(salesRowFromApi(r, studioByErp));
+  }
+  console.log(`[PKO] Loaded ${salesApi.length} sales rows, ${projectsApi.length} project meta rows, ${studioApi.length} studio rows from API`);
   return {rows: merged, years: ['live']};
 }
 // Separate helper for studio — called by init() in place of loadCsv(STUDIO_FILE)
@@ -1687,10 +1704,15 @@ async function loadStudioFromApi(){
 async function init(){
   const status = document.getElementById('status');
   try{
-    const [salesResult, studio] = await Promise.all([
+    // Kick off studio fetch FIRST so loadSalesFiles() can await it for the
+    // ERP->studio join. Both still happen in parallel: studio is fetched once,
+    // reused by both the Studio tab and the sales rows' name/brand backfill.
+    STATE._studioReady = fetchJson('studio');
+    const [salesResult, studioApi] = await Promise.all([
       loadSalesFiles(),
-      loadStudioFromApi(),
+      STATE._studioReady,
     ]);
+    const studio = studioApi.map(studioRowFromApi);
     const sales = salesResult.rows;
     STATE._loadedYears = salesResult.years;
 
