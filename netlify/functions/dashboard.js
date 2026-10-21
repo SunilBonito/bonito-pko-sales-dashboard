@@ -92,12 +92,14 @@ function setCached(key, data){ cache.set(key, { ts: Date.now(), data }); }
    ============================================================ */
 
 /* --- Query 1: SLIM sales line items aggregated by (project_no, erp_code).
-   Only columns the dashboard actually uses in sales rows:
-     project_no, erp_code, pko_date (min line date), amount, qty.
-   Everything else (product name, brand, category, backend type) is
-   joined on the FRONTEND by looking up erp_code in the studio catalog.
-   This cuts response size by ~70%. */
-const Q_SALES = `
+   PAGINATED — each call returns at most PAGE_SIZE rows ordered by
+   (project_no, erp_code), skipping (page * PAGE_SIZE). Frontend calls
+   repeatedly until it gets back fewer than PAGE_SIZE rows. */
+const PAGE_SIZE = 40000;  // ~4 MB per page, under Lambda's 6 MB cap
+
+function buildSalesQuery(page){
+  const offset = page * PAGE_SIZE;
+  return `
 WITH
 quotes_dedup AS (
   SELECT id, quotable_id
@@ -143,7 +145,10 @@ INNER JOIN quotes_dedup qd ON qd.id = li.quote_id
 INNER JOIN projects_dedup lp ON lp.id = qd.quotable_id
 INNER JOIN variants_dedup v ON v.id = li.product_variant_id
 GROUP BY lp.project_no, v.erp_code
+ORDER BY lp.project_no, v.erp_code
+LIMIT ${PAGE_SIZE} OFFSET ${offset}
 `;
+}
 
 /* --- Query 2: Studio product catalog (full detail, lives per-ERP once) ---
    Carries product_name, brand, category, backend_product_type, prices.
@@ -257,12 +262,16 @@ exports.handler = async (event) => {
   const wantsGzip = /\bgzip\b/.test(acceptEncoding);
 
   try {
-    let data = getCached(view);
+    const page = view === 'sales'
+      ? parseInt((event.queryStringParameters || {}).page || '0', 10)
+      : 0;
+    const cacheKey = view === 'sales' ? `sales:p${page}` : view;
+    let data = getCached(cacheKey);
     let cacheHit = !!data;
 
     if(!data){
       if(view === 'sales'){
-        data = await clickhouseQuery(Q_SALES);
+        data = await clickhouseQuery(buildSalesQuery(page));
       } else if(view === 'studio'){
         data = await clickhouseQuery(Q_STUDIO);
       } else if(view === 'projects'){
@@ -276,7 +285,7 @@ exports.handler = async (event) => {
       } else {
         return { statusCode: 400, headers, body: JSON.stringify({ error: `unknown view: ${view}` }) };
       }
-      setCached(view, data);
+      setCached(cacheKey, data);
     }
 
     const bodyStr = JSON.stringify(data);
