@@ -1657,14 +1657,30 @@ const PROJECT_TYPE_LABELS = { 1:'Turnkey', 5:'Sub', 8:'Stylist', 0:'Other', 2:'O
 // Studio catalog is loaded once and used both as its own dataset AND as a
 // lookup for sales rows. STATE.studioRaw holds the raw API response so we
 // can key by ERP for the sales merge.
+// Paginated sales fetch. Backend returns up to PAGE_SIZE rows per call;
+// we keep going until we get back a short page. Hard cap at 20 pages so a
+// runaway loop can't hang the browser.
+async function fetchSalesPaginated(){
+  const PAGE_SIZE = 40000;
+  const MAX_PAGES = 20;
+  const all = [];
+  for(let page = 0; page < MAX_PAGES; page++){
+    // fetchJson appends ?view=<arg>, so passing 'sales&page=N' gives
+    // /api/dashboard?view=sales&page=N which the backend parses correctly.
+    const rows = await fetchJson(`sales&page=${page}`);
+    all.push(...rows);
+    console.log(`[PKO] Sales page ${page}: +${rows.length} rows (total ${all.length})`);
+    if(rows.length < PAGE_SIZE) break;  // last page
+  }
+  return all;
+}
+
 async function loadSalesFiles(){
-  // 1. Pull sales + Postgres meta in parallel. Studio is loaded separately
-  //    in init() but we need it HERE to backfill names onto sales. So wait
-  //    for it via STATE._studioReady.
+  // 1. Pull sales (paginated), Postgres meta, and studio in parallel.
   const [salesApi, projectsApi, studioApi] = await Promise.all([
-    fetchJson('sales'),
+    fetchSalesPaginated(),
     fetchJson('projects'),
-    STATE._studioReady,  // kicked off in init()
+    STATE._studioReady,
   ]);
   // 2. Build project_no -> meta lookup
   const metaByPno = new Map();
