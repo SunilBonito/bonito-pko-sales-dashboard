@@ -1,15 +1,14 @@
 // Netlify Function — PKO Sales Dashboard backend
-//
-// Two data sources:
-//   1. ClickHouse (bonito_analytics) — sales line items + product catalog
-//   2. Postgres read-replica — project_details (project_value, project_type)
-//
-// Env vars:
-//   CH_HOST, CH_USER, CH_PASS, PG_HOST, PG_USER, PG_PASS, PG_DB
+// ClickHouse (sales + studio) + Postgres (project_details)
 
 const https = require('https');
 const zlib = require('zlib');
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
+
+// Make Postgres return decimals as numbers, not strings. 1700 = DECIMAL/NUMERIC.
+types.setTypeParser(1700, v => v === null ? null : parseFloat(v));
+types.setTypeParser(701,  v => v === null ? null : parseFloat(v));
+types.setTypeParser(23,   v => v === null ? null : parseInt(v, 10));
 
 /* ----------------------------- Postgres pool ---------------------------- */
 let pgPool = null;
@@ -30,7 +29,6 @@ function getPgPool(){
 }
 
 /* --------------------------- ClickHouse call ---------------------------- */
-// Request gzip from ClickHouse to cut network transit + memory.
 function clickhouseQuery(sql){
   return new Promise((resolve, reject) => {
     const auth = Buffer.from(`${process.env.CH_USER}:${process.env.CH_PASS}`).toString('base64');
@@ -55,10 +53,18 @@ function clickhouseQuery(sql){
       stream.on('data', chunk => { chunks.push(chunk); });
       stream.on('end', () => {
         const data = Buffer.concat(chunks).toString('utf8');
+        chunks.length = 0; // free early
         if(res.statusCode >= 400){
           return reject(new Error(`ClickHouse ${res.statusCode}: ${data.slice(0, 500)}`));
         }
-        const rows = data.split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+        // Parse line by line, pushing into array — don't hold the big string + array both
+        const lines = data.split('\n');
+        const rows = [];
+        for(let i = 0; i < lines.length; i++){
+          const l = lines[i];
+          if(l) rows.push(JSON.parse(l));
+          lines[i] = null;  // let GC reclaim parsed lines
+        }
         resolve(rows);
       });
       stream.on('error', reject);
@@ -85,10 +91,12 @@ function setCached(key, data){ cache.set(key, { ts: Date.now(), data }); }
    QUERIES
    ============================================================ */
 
-/* --- Query 1: Sales line items AGGREGATED by (project, erp_code) ---
-   Collapses the 12M raw line items down to one row per PID+ERP, with
-   summed qty and amount. Scoped to FY25+ (Apr 2025 onwards) matching
-   the existing CSV scope. */
+/* --- Query 1: SLIM sales line items aggregated by (project_no, erp_code).
+   Only columns the dashboard actually uses in sales rows:
+     project_no, erp_code, pko_date (min line date), amount, qty.
+   Everything else (product name, brand, category, backend type) is
+   joined on the FRONTEND by looking up erp_code in the studio catalog.
+   This cuts response size by ~70%. */
 const Q_SALES = `
 WITH
 quotes_dedup AS (
@@ -106,31 +114,9 @@ projects_dedup AS (
   LIMIT 1 BY id
 ),
 variants_dedup AS (
-  SELECT id, erp_code, name AS variant_name, product_id
+  SELECT id, erp_code
   FROM bonito_analytics.pulse_commerce_product_variants
   WHERE _peerdb_is_deleted = 0 AND erp_code IS NOT NULL AND erp_code != ''
-  ORDER BY _peerdb_version DESC
-  LIMIT 1 BY id
-),
-products_dedup AS (
-  SELECT id, name AS product_name,
-         product_brand_id, product_category_id, backend_product_type
-  FROM bonito_analytics.pulse_commerce_products
-  WHERE _peerdb_is_deleted = 0
-  ORDER BY _peerdb_version DESC
-  LIMIT 1 BY id
-),
-brands_dedup AS (
-  SELECT id, name AS brand_name
-  FROM bonito_analytics.pulse_commerce_product_brands
-  WHERE _peerdb_is_deleted = 0
-  ORDER BY _peerdb_version DESC
-  LIMIT 1 BY id
-),
-cats_dedup AS (
-  SELECT id, name AS category_name
-  FROM bonito_analytics.pulse_commerce_product_categories
-  WHERE _peerdb_is_deleted = 0
   ORDER BY _peerdb_version DESC
   LIMIT 1 BY id
 ),
@@ -141,72 +127,27 @@ line_items_dedup AS (
   FROM bonito_analytics.pulse_commerce_project_line_items
   WHERE _peerdb_is_deleted = 0
     AND created_at >= '2025-04-01'
+    AND created_at < '2026-11-01'
     AND total_price_with_discount > 0
   ORDER BY _peerdb_version DESC
   LIMIT 1 BY id
-),
-flat AS (
-  SELECT
-    lp.project_no AS project_no,
-    v.erp_code AS erp_code,
-    li.line_created_at AS line_date,
-    li.unit_price AS unit_price,
-    li.amount AS amount,
-    CASE WHEN li.unit_price > 0 THEN li.amount / li.unit_price ELSE 0 END AS qty,
-    p.product_name AS product_name,
-    v.variant_name AS variant_name,
-    b.brand_name AS brand,
-    c.category_name AS category,
-    p.backend_product_type AS backend_product_type
-  FROM line_items_dedup li
-  INNER JOIN quotes_dedup q ON q.id = li.quote_id
-  INNER JOIN projects_dedup lp ON lp.id = q.quotable_id
-  INNER JOIN variants_dedup v ON v.id = li.product_variant_id
-  LEFT JOIN products_dedup p ON p.id = v.product_id
-  LEFT JOIN brands_dedup b ON b.id = p.product_brand_id
-  LEFT JOIN cats_dedup c ON c.id = p.product_category_id
 )
 SELECT
-  project_no,
-  erp_code,
-  pko_date,
-  qty,
-  amount,
-  unit_price,
-  product_name,
-  variant_name,
-  brand,
-  category,
-  backend_product_type,
-  CASE backend_product_type
-    WHEN 46 THEN 'type_modular'
-    WHEN 47 THEN 'type_modular'
-    WHEN 48 THEN 'type_neo_modular'
-    WHEN 49 THEN 'type_bonito_studio'
-    WHEN 50 THEN 'type_service'
-    ELSE 'type_other'
-  END AS default_category
-FROM (
-  SELECT
-    project_no,
-    erp_code,
-    min(line_date) AS pko_date,
-    sum(qty) AS qty,
-    sum(amount) AS amount,
-    any(unit_price) AS unit_price,
-    any(product_name) AS product_name,
-    any(variant_name) AS variant_name,
-    any(brand) AS brand,
-    any(category) AS category,
-    any(backend_product_type) AS backend_product_type
-  FROM flat
-  GROUP BY project_no, erp_code
-) agg
+  lp.project_no AS p,
+  v.erp_code AS e,
+  toDate(min(li.line_created_at)) AS d,
+  round(sum(li.amount), 2) AS a,
+  round(sum(CASE WHEN li.unit_price > 0 THEN li.amount / li.unit_price ELSE 0 END), 3) AS q
+FROM line_items_dedup li
+INNER JOIN quotes_dedup qd ON qd.id = li.quote_id
+INNER JOIN projects_dedup lp ON lp.id = qd.quotable_id
+INNER JOIN variants_dedup v ON v.id = li.product_variant_id
+GROUP BY lp.project_no, v.erp_code
 `;
 
-/* --- Query 2: Studio product catalog ---
-   One row per variant with brand, category, latest BNG/MUM prices,
-   created_at (for age calc), and status. */
+/* --- Query 2: Studio product catalog (full detail, lives per-ERP once) ---
+   Carries product_name, brand, category, backend_product_type, prices.
+   Sales rows reference ERPs that get fat-join'd on the browser. */
 const Q_STUDIO = `
 WITH
 variants_dedup AS (
@@ -275,7 +216,7 @@ SELECT
   END AS default_category,
   p.backend_product_type AS backend_product_type,
   p.bom_type AS bom_type,
-  p.created_at AS created_date,
+  toString(p.created_at) AS created_date,
   p.status AS status,
   COALESCE(bng.bng_sp, 0) AS bng_sp,
   COALESCE(mum.mum_sp, 0) AS mum_sp
@@ -287,7 +228,6 @@ LEFT JOIN bng_prices bng ON bng.variant_id = v.id
 LEFT JOIN mum_prices mum ON mum.variant_id = v.id
 `;
 
-/* --- Query 3: Postgres project metadata --- */
 const Q_PROJECTS_PG = `
   SELECT project_no, project_type, project_value,
          branch, status, current_milestone, p_date, campaign
@@ -313,7 +253,6 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'missing ?view= param' }) };
   }
 
-  // Browser can request gzip on the response too
   const acceptEncoding = (event.headers && (event.headers['accept-encoding'] || event.headers['Accept-Encoding'])) || '';
   const wantsGzip = /\bgzip\b/.test(acceptEncoding);
 
@@ -342,7 +281,6 @@ exports.handler = async (event) => {
 
     const bodyStr = JSON.stringify(data);
 
-    // gzip response if browser accepts it (big win on big payloads)
     if(wantsGzip && bodyStr.length > 10000){
       const compressed = zlib.gzipSync(bodyStr);
       return {
@@ -352,6 +290,7 @@ exports.handler = async (event) => {
           'Content-Encoding': 'gzip',
           'X-Cache': cacheHit ? 'HIT' : 'MISS',
           'X-Row-Count': String(data.length),
+          'X-Bytes': String(bodyStr.length),
         },
         body: compressed.toString('base64'),
         isBase64Encoded: true,
