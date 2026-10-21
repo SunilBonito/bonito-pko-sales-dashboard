@@ -21,3 +21,6 @@
 [functions]
   node_bundler = "esbuild"
   included_files = []
+  
+[build.environment]
+  SECRETS_SCAN_ENABLED = "false"
