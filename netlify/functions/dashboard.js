@@ -2,24 +2,16 @@
 //
 // Hits TWO data sources:
 //   1. ClickHouse (bonito_analytics) for sales line items + product catalog
-//      - Mirrored from Postgres by PeerDB, lag ~1 minute
-//      - Fast aggregations across 12M line items
 //   2. Postgres read-replica for project_details (project_value, project_type)
-//      - OLTP, straight lookup
-//      - Small table (~19K rows), instant
 //
-// Pattern cloned from the DM Review dashboard: query whitelist, 60s cache,
-// Basic auth to ClickHouse HTTPS port, pg for Postgres.
-//
-// Env vars needed in Netlify dashboard:
-//   CH_HOST, CH_USER, CH_PASS   (ClickHouse cloud)
-//   PG_HOST, PG_USER, PG_PASS, PG_DB (Postgres read replica)
+// Env vars needed:
+//   CH_HOST, CH_USER, CH_PASS         (ClickHouse cloud)
+//   PG_HOST, PG_USER, PG_PASS, PG_DB  (Postgres read replica)
 
 const https = require('https');
 const { Pool } = require('pg');
 
 /* ----------------------------- Postgres pool ---------------------------- */
-// Lazy-init so cold starts don't open a connection unless we need one.
 let pgPool = null;
 function getPgPool(){
   if(pgPool) return pgPool;
@@ -29,8 +21,8 @@ function getPgPool(){
     password: process.env.PG_PASS,
     database: process.env.PG_DB,
     port: 5432,
-    ssl: { rejectUnauthorized: false },  // RDS uses self-signed on default endpoint
-    max: 3,                 // Netlify functions are short-lived, keep low
+    ssl: { rejectUnauthorized: false },
+    max: 3,
     idleTimeoutMillis: 10000,
     connectionTimeoutMillis: 8000,
   });
@@ -38,8 +30,6 @@ function getPgPool(){
 }
 
 /* --------------------------- ClickHouse call ---------------------------- */
-// Mirrors the DM Review dashboard's pattern: HTTPS POST with SQL as body,
-// Basic auth header, TabSeparatedWithNames as output format.
 function clickhouseQuery(sql){
   return new Promise((resolve, reject) => {
     const auth = Buffer.from(`${process.env.CH_USER}:${process.env.CH_PASS}`).toString('base64');
@@ -62,7 +52,6 @@ function clickhouseQuery(sql){
         if(res.statusCode >= 400){
           return reject(new Error(`ClickHouse ${res.statusCode}: ${data.slice(0, 500)}`));
         }
-        // JSONEachRow returns one JSON object per line
         const rows = data.split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
         resolve(rows);
       });
@@ -75,103 +64,87 @@ function clickhouseQuery(sql){
 }
 
 /* ----------------------------- Query cache ------------------------------ */
-// Simple in-memory cache per Netlify function instance. Instances recycle
-// every ~5 min so cache naturally expires. We keep a hard TTL too.
-const CACHE_TTL_MS = 60 * 1000;  // 60 seconds
-const cache = new Map();  // key = view name, value = {ts, data}
-
+const CACHE_TTL_MS = 60 * 1000;
+const cache = new Map();
 function getCached(key){
   const entry = cache.get(key);
   if(!entry) return null;
-  if(Date.now() - entry.ts > CACHE_TTL_MS){
-    cache.delete(key);
-    return null;
-  }
+  if(Date.now() - entry.ts > CACHE_TTL_MS){ cache.delete(key); return null; }
   return entry.data;
 }
-function setCached(key, data){
-  cache.set(key, { ts: Date.now(), data });
-}
+function setCached(key, data){ cache.set(key, { ts: Date.now(), data }); }
 
 /* ============================================================
-   QUERIES — whitelisted so only known views can be fetched
+   QUERIES — use LIMIT 1 BY id ORDER BY _peerdb_version DESC
+   for dedup (matches DM Review dashboard pattern)
    ============================================================ */
 
-/* --- Query 1: Sales line items (the big one, 12M rows aggregated) ---
-   Flattens line_items + quotes + projects + variants + products + brands + categories
-   into one row per line item with the fields the dashboard needs. Scoped to FY25
-   onwards to keep response size sane (~200K rows). */
+/* --- Query 1: Sales line items (big one, aggregated) ---
+   Join path: line_items -> quotes -> projects
+              line_items -> variants -> products -> brands + categories
+   Scoped to FY25 onwards to keep response size sane. */
 const Q_SALES = `
-WITH latest_quotes AS (
-  SELECT argMax(id, _peerdb_version) AS id,
-         argMax(quotable_id, _peerdb_version) AS project_id,
-         argMax(category, _peerdb_version) AS quote_category
+WITH
+quotes_dedup AS (
+  SELECT id, quotable_id
   FROM bonito_analytics.pulse_quotes
   WHERE quotable_type = 'Project' AND _peerdb_is_deleted = 0
-  GROUP BY id
+  ORDER BY _peerdb_version DESC
+  LIMIT 1 BY id
 ),
-latest_projects AS (
-  SELECT argMax(id, _peerdb_version) AS id,
-         argMax(project_no, _peerdb_version) AS project_no,
-         argMax(created_at, _peerdb_version) AS project_created_at
+projects_dedup AS (
+  SELECT id, project_no
   FROM bonito_analytics.pulse_projects
-  WHERE _peerdb_is_deleted = 0
-  GROUP BY id
+  WHERE _peerdb_is_deleted = 0 AND project_no IS NOT NULL AND project_no > 0
+  ORDER BY _peerdb_version DESC
+  LIMIT 1 BY id
 ),
-latest_variants AS (
-  SELECT argMax(id, _peerdb_version) AS id,
-         argMax(erp_code, _peerdb_version) AS v_erp_code,
-         argMax(name, _peerdb_version) AS v_name,
-         argMax(product_id, _peerdb_version) AS product_id
+variants_dedup AS (
+  SELECT id, erp_code, name AS variant_name, product_id
   FROM bonito_analytics.pulse_commerce_product_variants
   WHERE _peerdb_is_deleted = 0
-  GROUP BY id
+  ORDER BY _peerdb_version DESC
+  LIMIT 1 BY id
 ),
-latest_products AS (
-  SELECT argMax(id, _peerdb_version) AS id,
-         argMax(name, _peerdb_version) AS p_name,
-         argMax(erp_code, _peerdb_version) AS p_erp_code,
-         argMax(product_brand_id, _peerdb_version) AS product_brand_id,
-         argMax(product_category_id, _peerdb_version) AS product_category_id,
-         argMax(backend_product_type, _peerdb_version) AS backend_product_type,
-         argMax(created_at, _peerdb_version) AS product_created_at,
-         argMax(status, _peerdb_version) AS product_status
+products_dedup AS (
+  SELECT id, name AS product_name, erp_code AS p_erp_code,
+         product_brand_id, product_category_id, backend_product_type
   FROM bonito_analytics.pulse_commerce_products
   WHERE _peerdb_is_deleted = 0
-  GROUP BY id
+  ORDER BY _peerdb_version DESC
+  LIMIT 1 BY id
 ),
-latest_brands AS (
-  SELECT argMax(id, _peerdb_version) AS id,
-         argMax(name, _peerdb_version) AS brand_name
+brands_dedup AS (
+  SELECT id, name AS brand_name
   FROM bonito_analytics.pulse_commerce_product_brands
   WHERE _peerdb_is_deleted = 0
-  GROUP BY id
+  ORDER BY _peerdb_version DESC
+  LIMIT 1 BY id
 ),
-latest_cats AS (
-  SELECT argMax(id, _peerdb_version) AS id,
-         argMax(name, _peerdb_version) AS category_name
+cats_dedup AS (
+  SELECT id, name AS category_name
   FROM bonito_analytics.pulse_commerce_product_categories
   WHERE _peerdb_is_deleted = 0
-  GROUP BY id
+  ORDER BY _peerdb_version DESC
+  LIMIT 1 BY id
 ),
 line_items_dedup AS (
-  SELECT argMax(id, _peerdb_version) AS id,
-         argMax(quote_id, _peerdb_version) AS quote_id,
-         argMax(product_variant_id, _peerdb_version) AS product_variant_id,
-         argMax(unit_price, _peerdb_version) AS unit_price,
-         argMax(total_price_with_discount, _peerdb_version) AS amount,
-         argMax(created_at, _peerdb_version) AS line_created_at
+  SELECT id, quote_id, product_variant_id, unit_price,
+         total_price_with_discount AS amount,
+         created_at AS line_created_at
   FROM bonito_analytics.pulse_commerce_project_line_items
   WHERE _peerdb_is_deleted = 0
     AND created_at >= '2025-04-01'
-  GROUP BY id
+    AND total_price_with_discount > 0
+  ORDER BY _peerdb_version DESC
+  LIMIT 1 BY id
 )
 SELECT
   lp.project_no AS project_no,
   li.line_created_at AS pko_date,
-  COALESCE(v.v_erp_code, p.p_erp_code, '') AS erp_code,
-  COALESCE(p.p_name, v.v_name, '') AS product_name,
-  v.v_name AS variant_name,
+  COALESCE(v.erp_code, p.p_erp_code, '') AS erp_code,
+  COALESCE(p.product_name, v.variant_name, '') AS product_name,
+  v.variant_name AS variant_name,
   COALESCE(b.brand_name, '') AS brand,
   COALESCE(c.category_name, '') AS category,
   p.backend_product_type AS backend_product_type,
@@ -188,85 +161,70 @@ SELECT
        ELSE 0
   END AS qty,
   li.amount AS amount,
-  li.unit_price AS unit_price,
-  p.product_created_at AS product_created_date,
-  p.product_status AS status
+  li.unit_price AS unit_price
 FROM line_items_dedup li
-INNER JOIN latest_quotes q ON q.id = li.quote_id
-INNER JOIN latest_projects lp ON lp.id = q.project_id
-LEFT JOIN latest_variants v ON v.id = li.product_variant_id
-LEFT JOIN latest_products p ON p.id = v.product_id
-LEFT JOIN latest_brands b ON b.id = p.product_brand_id
-LEFT JOIN latest_cats c ON c.id = p.product_category_id
-WHERE lp.project_no IS NOT NULL AND lp.project_no > 0
-  AND li.amount > 0
+INNER JOIN quotes_dedup q ON q.id = li.quote_id
+INNER JOIN projects_dedup lp ON lp.id = q.quotable_id
+LEFT JOIN variants_dedup v ON v.id = li.product_variant_id
+LEFT JOIN products_dedup p ON p.id = v.product_id
+LEFT JOIN brands_dedup b ON b.id = p.product_brand_id
+LEFT JOIN cats_dedup c ON c.id = p.product_category_id
 LIMIT 500000
 `;
 
-/* --- Query 2: Studio product catalog ---
-   The "Studio Dump" equivalent. All sellable product variants with brand,
-   category, latest BNG and MUM prices, created_at (for age calc). */
+/* --- Query 2: Studio product catalog --- */
 const Q_STUDIO = `
-WITH latest_variants AS (
-  SELECT argMax(id, _peerdb_version) AS id,
-         argMax(erp_code, _peerdb_version) AS erp_code,
-         argMax(name, _peerdb_version) AS variant_name,
-         argMax(product_id, _peerdb_version) AS product_id,
-         argMax(status, _peerdb_version) AS v_status
+WITH
+variants_dedup AS (
+  SELECT id, erp_code, name AS variant_name, product_id, status AS v_status
   FROM bonito_analytics.pulse_commerce_product_variants
   WHERE _peerdb_is_deleted = 0
-  GROUP BY id
+  ORDER BY _peerdb_version DESC
+  LIMIT 1 BY id
 ),
-latest_products AS (
-  SELECT argMax(id, _peerdb_version) AS id,
-         argMax(name, _peerdb_version) AS product_name,
-         argMax(erp_code, _peerdb_version) AS p_erp_code,
-         argMax(product_brand_id, _peerdb_version) AS product_brand_id,
-         argMax(product_category_id, _peerdb_version) AS product_category_id,
-         argMax(backend_product_type, _peerdb_version) AS backend_product_type,
-         argMax(bom_type, _peerdb_version) AS bom_type,
-         argMax(created_at, _peerdb_version) AS created_at,
-         argMax(status, _peerdb_version) AS status
+products_dedup AS (
+  SELECT id, name AS product_name, erp_code AS p_erp_code,
+         product_brand_id, product_category_id,
+         backend_product_type, bom_type, created_at, status
   FROM bonito_analytics.pulse_commerce_products
   WHERE _peerdb_is_deleted = 0
-  GROUP BY id
+  ORDER BY _peerdb_version DESC
+  LIMIT 1 BY id
 ),
-latest_brands AS (
-  SELECT argMax(id, _peerdb_version) AS id,
-         argMax(name, _peerdb_version) AS brand_name
+brands_dedup AS (
+  SELECT id, name AS brand_name
   FROM bonito_analytics.pulse_commerce_product_brands
-  WHERE _peerdb_is_deleted = 0 GROUP BY id
+  WHERE _peerdb_is_deleted = 0
+  ORDER BY _peerdb_version DESC
+  LIMIT 1 BY id
 ),
-latest_cats AS (
-  SELECT argMax(id, _peerdb_version) AS id,
-         argMax(name, _peerdb_version) AS category_name
+cats_dedup AS (
+  SELECT id, name AS category_name
   FROM bonito_analytics.pulse_commerce_product_categories
-  WHERE _peerdb_is_deleted = 0 GROUP BY id
+  WHERE _peerdb_is_deleted = 0
+  ORDER BY _peerdb_version DESC
+  LIMIT 1 BY id
 ),
-latest_prices AS (
-  SELECT argMax(id, _peerdb_version) AS id,
-         argMax(code, _peerdb_version) AS pl_code,
-         argMax(sell_price, _peerdb_version) AS sell_price,
-         argMax(commerce_product_variant_id, _peerdb_version) AS variant_id
+prices_dedup AS (
+  SELECT id, code AS pl_code, sell_price,
+         commerce_product_variant_id AS variant_id
   FROM bonito_analytics.pulse_commerce_product_variant_prices
-  WHERE _peerdb_is_deleted = 0 GROUP BY id
+  WHERE _peerdb_is_deleted = 0 AND sell_price > 0
+  ORDER BY _peerdb_version DESC
+  LIMIT 1 BY id
 ),
--- Latest BNG price per variant
+-- Latest BNG price per variant (take highest price id = most recent)
 bng_prices AS (
-  SELECT variant_id,
-         argMax(sell_price, id) AS bng_sp
-  FROM latest_prices
-  WHERE (pl_code LIKE 'PL-BNG-%' OR pl_code LIKE 'BLR%' OR pl_code LIKE 'Price_BLR%')
-    AND sell_price > 0
+  SELECT variant_id, argMax(sell_price, id) AS bng_sp
+  FROM prices_dedup
+  WHERE pl_code LIKE 'PL-BNG-%' OR pl_code LIKE 'BLR%' OR pl_code LIKE 'Price_BLR%'
   GROUP BY variant_id
 ),
 -- Latest MUM price per variant
 mum_prices AS (
-  SELECT variant_id,
-         argMax(sell_price, id) AS mum_sp
-  FROM latest_prices
-  WHERE (pl_code LIKE 'PL-MUM-%' OR pl_code LIKE 'MUM%')
-    AND sell_price > 0
+  SELECT variant_id, argMax(sell_price, id) AS mum_sp
+  FROM prices_dedup
+  WHERE pl_code LIKE 'PL-MUM-%' OR pl_code LIKE 'MUM%'
   GROUP BY variant_id
 )
 SELECT
@@ -289,27 +247,20 @@ SELECT
   p.status AS status,
   COALESCE(bng.bng_sp, 0) AS bng_sp,
   COALESCE(mum.mum_sp, 0) AS mum_sp
-FROM latest_variants v
-INNER JOIN latest_products p ON p.id = v.product_id
-LEFT JOIN latest_brands b ON b.id = p.product_brand_id
-LEFT JOIN latest_cats c ON c.id = p.product_category_id
+FROM variants_dedup v
+INNER JOIN products_dedup p ON p.id = v.product_id
+LEFT JOIN brands_dedup b ON b.id = p.product_brand_id
+LEFT JOIN cats_dedup c ON c.id = p.product_category_id
 LEFT JOIN bng_prices bng ON bng.variant_id = v.id
 LEFT JOIN mum_prices mum ON mum.variant_id = v.id
 WHERE v.erp_code IS NOT NULL AND v.erp_code != ''
-  AND p.status = 1  -- active products only
+  AND p.status = 1
 `;
 
-/* --- Query 3: Project metadata from Postgres ---
-   project_no -> project_value, project_type, branch. One row per PID. */
+/* --- Query 3: Postgres project metadata --- */
 const Q_PROJECTS_PG = `
-  SELECT project_no,
-         project_type,
-         project_value,
-         branch,
-         status,
-         current_milestone,
-         p_date,
-         campaign
+  SELECT project_no, project_type, project_value,
+         branch, status, current_milestone, p_date, campaign
   FROM project_details
   WHERE project_no IS NOT NULL
 `;
@@ -348,7 +299,6 @@ exports.handler = async (event) => {
     } else if(view === 'studio'){
       data = await clickhouseQuery(Q_STUDIO);
     } else if(view === 'projects'){
-      // Postgres pull — the Project Value / Project Type lookup
       const client = await getPgPool().connect();
       try {
         const result = await client.query(Q_PROJECTS_PG);
