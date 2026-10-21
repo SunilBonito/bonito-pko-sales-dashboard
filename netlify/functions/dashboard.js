@@ -169,16 +169,16 @@ flat AS (
 SELECT
   project_no,
   erp_code,
-  min(line_date) AS pko_date,
-  sum(qty) AS qty,
-  sum(amount) AS amount,
-  any(unit_price) AS unit_price,
-  any(product_name) AS product_name,
-  any(variant_name) AS variant_name,
-  any(brand) AS brand,
-  any(category) AS category,
-  any(backend_product_type) AS backend_product_type,
-  CASE any(backend_product_type)
+  pko_date,
+  qty,
+  amount,
+  unit_price,
+  product_name,
+  variant_name,
+  brand,
+  category,
+  backend_product_type,
+  CASE backend_product_type
     WHEN 46 THEN 'type_modular'
     WHEN 47 THEN 'type_modular'
     WHEN 48 THEN 'type_neo_modular'
@@ -186,8 +186,22 @@ SELECT
     WHEN 50 THEN 'type_service'
     ELSE 'type_other'
   END AS default_category
-FROM flat
-GROUP BY project_no, erp_code
+FROM (
+  SELECT
+    project_no,
+    erp_code,
+    min(line_date) AS pko_date,
+    sum(qty) AS qty,
+    sum(amount) AS amount,
+    any(unit_price) AS unit_price,
+    any(product_name) AS product_name,
+    any(variant_name) AS variant_name,
+    any(brand) AS brand,
+    any(category) AS category,
+    any(backend_product_type) AS backend_product_type
+  FROM flat
+  GROUP BY project_no, erp_code
+) agg
 `;
 
 /* --- Query 2: Studio product catalog ---
