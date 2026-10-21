@@ -1,0 +1,23 @@
+# Netlify build config for PKO Sales Dashboard
+# No build step — static site + one serverless function
+
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+# Route /api/dashboard?... → netlify function
+[[redirects]]
+  from = "/api/dashboard"
+  to = "/.netlify/functions/dashboard"
+  status = 200
+  force = true
+
+# Fallback SPA-style (not strictly needed but harmless)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[functions]
+  node_bundler = "esbuild"
+  included_files = []

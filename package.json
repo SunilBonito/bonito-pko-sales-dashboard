@@ -1,0 +1,12 @@
+{
+  "name": "bonito-pko-sales-dashboard",
+  "version": "1.0.0",
+  "description": "PKO Sales Dashboard — ClickHouse + Postgres hybrid, live data",
+  "private": true,
+  "dependencies": {
+    "pg": "^8.11.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

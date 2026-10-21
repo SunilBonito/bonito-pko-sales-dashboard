@@ -1,0 +1,3974 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>PKO Sales · Dashboard</title>
+
+<!-- Fonts: editorial serif + utilitarian mono -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+<!-- Libs -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<style>
+  :root{
+    --ink:#1a1915;
+    --ink-2:#3a3731;
+    --muted:#7a766d;
+    --line:#e3ded3;
+    --paper:#f6f1e6;
+    --paper-2:#ede6d4;
+    --card:#fffdf7;
+    --accent:#b8421f;      /* burnt sienna */
+    --accent-2:#2e4a3a;    /* forest */
+    --accent-3:#c8a13d;    /* mustard */
+    --accent-4:#4a5ba3;    /* ink blue */
+    --danger:#a63030;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:'Inter',sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+    font-size:14px;
+    line-height:1.45;
+    background-image:
+      radial-gradient(circle at 20% 10%, rgba(184,66,31,.04), transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(46,74,58,.05), transparent 45%);
+  }
+  .mono{font-family:'JetBrains Mono',monospace;font-feature-settings:"tnum"}
+  .serif{font-family:'Fraunces',serif;font-optical-sizing:auto}
+
+  /* ——— top bar ——— */
+  header.topbar{
+    display:flex;align-items:baseline;justify-content:space-between;
+    padding:28px 40px 18px;border-bottom:1px solid var(--line);
+    background:var(--paper);
+  }
+  .title{font-family:'Fraunces',serif;font-weight:600;font-size:28px;letter-spacing:-.01em}
+  .title em{font-style:italic;color:var(--accent);font-weight:500}
+  .sub{color:var(--muted);font-size:12.5px;letter-spacing:.02em;text-transform:uppercase;margin-top:4px}
+  .topbar-right{display:flex;gap:14px;align-items:center;color:var(--muted);font-size:12px}
+  .topbar-right #status{padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:var(--card)}
+  .topbar-right #status.loaded{border-color:var(--accent-2);color:var(--accent-2)}
+  .topbar-right #status.error{border-color:var(--danger);color:var(--danger)}
+
+  /* ——— layout ——— */
+  main{display:grid;grid-template-columns:260px 1fr;gap:0;min-height:calc(100vh - 80px)}
+  aside.filters{
+    border-right:1px solid var(--line);
+    padding:24px 22px;
+    background:linear-gradient(180deg,var(--paper) 0%, var(--paper-2) 100%);
+  }
+  aside.filters h3{
+    font-family:'Fraunces',serif;font-weight:500;font-size:11px;
+    letter-spacing:.2em;text-transform:uppercase;color:var(--ink-2);
+    margin:18px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--line);
+  }
+  aside.filters h3:first-of-type{margin-top:0}
+  .filter-group{display:flex;flex-direction:column;gap:3px;max-height:200px;overflow-y:auto;padding-right:4px;font-size:12.5px}
+  .filter-group::-webkit-scrollbar{width:5px}
+  .filter-group::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+  .filter-group label{display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer;color:var(--ink-2)}
+  .filter-group label:hover{color:var(--ink)}
+  .filter-group input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
+  .filter-search{
+    width:100%;padding:6px 10px;border:1px solid var(--line);
+    background:var(--card);border-radius:4px;font-size:12px;font-family:inherit;
+    margin-bottom:6px;color:var(--ink);
+  }
+  .filter-search:focus{outline:none;border-color:var(--accent)}
+  .date-row{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+  .date-row input{flex:1;min-width:0;padding:5px 8px;border:1px solid var(--line);background:var(--card);border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink)}
+  .reset-btn{
+    margin-top:18px;width:100%;padding:8px;background:var(--ink);color:var(--paper);
+    border:none;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px;
+    letter-spacing:.08em;text-transform:uppercase;
+  }
+  .reset-btn:hover{background:var(--accent)}
+
+  /* clear-per-group link */
+  .clear-link{
+    background:none;border:none;cursor:pointer;
+    font-family:inherit;font-size:10px;color:var(--muted);
+    text-transform:lowercase;letter-spacing:.04em;
+    padding:0 0 0 8px;font-weight:400;
+  }
+  .clear-link:hover{color:var(--accent);text-decoration:underline}
+  aside.filters h3{display:flex;justify-content:space-between;align-items:baseline}
+
+  /* PID toggle row */
+  .option-toggle{
+    display:flex;align-items:flex-start;gap:8px;font-size:12px;
+    color:var(--ink-2);cursor:pointer;padding:4px 0;line-height:1.4;
+  }
+  .option-toggle input{accent-color:var(--accent);cursor:pointer;margin-top:2px;flex-shrink:0}
+  .option-toggle:hover{color:var(--ink)}
+
+  /* Active filter pills */
+  #active-filters-wrap{
+    margin-bottom:18px;padding:12px 14px;background:var(--card);
+    border:1px solid var(--accent);border-radius:6px;
+  }
+  .active-filters-head{
+    display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;
+    font-family:'Fraunces',serif;font-size:11px;letter-spacing:.15em;
+    text-transform:uppercase;color:var(--accent);
+  }
+  .pills{display:flex;flex-wrap:wrap;gap:4px}
+  .pill{
+    display:inline-flex;align-items:center;gap:4px;
+    background:var(--paper-2);color:var(--ink);
+    padding:3px 8px;border-radius:999px;font-size:11px;
+    border:1px solid var(--line);
+  }
+  .pill .pill-type{font-size:9px;text-transform:uppercase;color:var(--muted);letter-spacing:.05em}
+  .pill button{
+    background:none;border:none;cursor:pointer;font-size:14px;line-height:1;
+    padding:0 0 0 2px;color:var(--muted);
+  }
+  .pill button:hover{color:var(--danger)}
+
+  /* Chart hover / click affordance */
+  .chart-wrap canvas{cursor:pointer}
+  .chart-hint{
+    font-size:10px;color:var(--muted);font-style:italic;margin-top:6px;
+    text-align:right;
+  }
+
+  /* Download buttons on tabs */
+  .tab-actions{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px}
+  .download-btn{
+    display:inline-flex;align-items:center;gap:6px;
+    background:var(--card);border:1px solid var(--line);
+    padding:6px 12px;border-radius:4px;cursor:pointer;
+    font-family:inherit;font-size:11px;color:var(--ink-2);
+    letter-spacing:.04em;
+    transition:border-color .15s, color .15s;
+  }
+  .download-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .download-btn svg{width:13px;height:13px}
+  .download-btn-prominent{
+    padding:12px 20px;font-size:13px;background:var(--ink);color:var(--paper);border-color:var(--ink);
+  }
+  .download-btn-prominent svg{width:15px;height:15px}
+  .download-btn-prominent:hover{background:var(--accent);border-color:var(--accent);color:var(--paper)}
+
+  .empty-tab{
+    padding:48px 36px;background:var(--card);border:1px solid var(--line);border-radius:6px;
+    text-align:left;max-width:560px;
+  }
+  .empty-tab h2{font-family:'Fraunces',serif;font-weight:500;font-size:20px;letter-spacing:-.01em}
+
+  /* ——— canvas ——— */
+  .canvas{padding:28px 40px 60px;min-width:0}
+  body{overflow-x:hidden}
+
+  /* ——— View toggle (Sales / Inventory Analysis) ——— */
+  .view-toggle{
+    display:inline-flex;background:var(--card);border:1px solid var(--line);
+    border-radius:8px;padding:4px;margin-bottom:24px;gap:2px;
+  }
+  .view-toggle button{
+    background:transparent;border:0;padding:8px 18px;font-size:13px;
+    font-family:inherit;font-weight:500;color:var(--muted);cursor:pointer;
+    border-radius:6px;transition:all .15s ease;letter-spacing:.01em;
+  }
+  .view-toggle button:hover:not(.active){color:var(--ink)}
+  .view-toggle button.active{
+    background:var(--ink);color:var(--paper);
+  }
+
+  /* ——— Inventory analysis view styling ——— */
+  .inv-section{margin-bottom:32px}
+  .inv-section-title{
+    font-family:'Fraunces',serif;font-weight:500;font-size:22px;
+    letter-spacing:-.01em;margin:0 0 4px;color:var(--ink);
+  }
+  .inv-section-sub{font-size:12px;color:var(--muted);margin-bottom:18px}
+
+  /* Inventory KPI tiles — distinct color accent per tile */
+  .inv-kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:28px}
+  .inv-kpi{
+    background:var(--card);border:1px solid var(--line);
+    border-radius:8px;padding:18px 16px 16px;position:relative;overflow:hidden;
+  }
+  .inv-kpi::before{
+    content:'';position:absolute;top:0;left:0;right:0;height:3px;
+  }
+  .inv-kpi.k-orange::before{background:#d97706}
+  .inv-kpi.k-rose::before  {background:var(--accent)}
+  .inv-kpi.k-amber::before {background:#b45309}
+  .inv-kpi.k-yellow::before{background:#a16207}
+  .inv-kpi.k-green::before {background:var(--accent-2)}
+  .inv-kpi.k-teal::before  {background:#0f766e}
+  .inv-kpi .ik-label{font-size:10px;font-weight:600;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+  .inv-kpi .ik-value{font-family:'Fraunces',serif;font-size:28px;font-weight:500;
+    color:var(--ink);letter-spacing:-.02em;line-height:1.1}
+  .inv-kpi .ik-sub{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.3}
+
+  /* Findings + Metric definitions panel */
+  .inv-panels{display:grid;grid-template-columns:2fr 1fr;gap:18px;margin-bottom:28px}
+  .inv-panel{
+    background:var(--card);border:1px solid var(--line);border-radius:8px;padding:18px 20px;
+  }
+  .inv-panel-dark{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  .inv-panel-title{
+    font-family:'Fraunces',serif;font-weight:500;font-size:16px;
+    margin:0 0 14px;display:flex;align-items:center;gap:8px;
+  }
+  .inv-panel-dark .inv-panel-title{color:var(--paper)}
+  .finding{display:flex;gap:12px;padding:10px 12px;background:var(--paper);border-radius:6px;margin-bottom:8px;align-items:flex-start}
+  .finding:last-child{margin-bottom:0}
+  .finding-num{
+    flex-shrink:0;width:26px;height:26px;border-radius:6px;
+    display:flex;align-items:center;justify-content:center;
+    color:var(--paper);font-weight:600;font-size:13px;
+  }
+  .finding-title{font-size:13px;font-weight:600;color:var(--ink);margin-bottom:2px}
+  .finding-body{font-size:11.5px;color:var(--muted);line-height:1.4}
+  .finding-cta{color:var(--ink);font-weight:600}
+
+  .defs dl{margin:0;font-size:11.5px}
+  .defs dt{font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.06em;margin-top:10px}
+  .defs dt:first-child{margin-top:0}
+  .defs dd{margin:3px 0 0;color:#cfcab8;line-height:1.4;font-size:11px}
+  .defs dt.d-orange{color:#fbbf24}
+  .defs dt.d-rose  {color:#fca5a5}
+  .defs dt.d-amber {color:#fcd34d}
+  .defs dt.d-yellow{color:#fde68a}
+  .defs dt.d-teal  {color:#5eead4}
+
+  /* Per-main sourcing table */
+  .inv-table-wrap{background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:28px}
+  .inv-table-head{padding:14px 18px;background:var(--paper-2,#ece5d3);border-bottom:1px solid var(--line)}
+  .inv-table-head h3{margin:0;font-family:'Fraunces',serif;font-weight:500;font-size:16px;color:var(--ink)}
+  .inv-table-head .sub{font-size:11px;color:var(--muted);margin-top:2px}
+  .inv-table{width:100%;border-collapse:collapse;font-size:13px}
+  .inv-table thead th{
+    background:var(--ink);color:var(--paper);
+    text-transform:uppercase;font-size:10.5px;letter-spacing:.06em;font-weight:600;
+    padding:10px 12px;text-align:left;white-space:nowrap;
+  }
+  .inv-table thead th.num{text-align:right}
+  .inv-table thead th.ctr{text-align:center}
+  .inv-table tbody td{padding:10px 12px;border-bottom:1px solid var(--line);font-size:12.5px}
+  .inv-table tbody td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .inv-table tbody td.ctr{text-align:center}
+  .inv-table tbody tr:hover{background:var(--paper)}
+  .inv-table tbody tr:last-child td{border-bottom:0}
+  .inv-table tfoot td{
+    background:var(--ink);color:var(--paper);font-weight:600;
+    padding:11px 12px;font-size:12.5px;
+  }
+  .inv-table tfoot td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .inv-table tfoot td.ctr{text-align:center}
+  .priority-pill{display:inline-block;padding:3px 10px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.04em}
+  .priority-high{background:#fce8e2;color:var(--accent);border:1px solid #f4c8b8}
+  .priority-med {background:#f7f0dc;color:#7a5e16;border:1px solid #e2d4a6}
+  .priority-low {background:var(--paper);color:var(--muted);border:1px solid var(--line)}
+
+  /* Brand drill filters */
+  .inv-filters{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:14px 18px;background:var(--paper);border-bottom:1px solid var(--line)}
+  .inv-filters label{display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:5px}
+  .inv-filters select{
+    width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;
+    background:var(--card);font-family:inherit;font-size:13px;color:var(--ink);
+  }
+  .inv-filters select:focus{outline:none;border-color:var(--ink)}
+
+  .inv-filter-actions{
+    display:flex;gap:10px;padding:10px 18px;background:var(--paper);
+    border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center;
+  }
+  .inv-btn-reset, .inv-btn-download{
+    display:inline-flex;align-items:center;gap:4px;
+    padding:7px 14px;border-radius:6px;font-family:inherit;font-size:12px;
+    font-weight:500;cursor:pointer;letter-spacing:.02em;
+    border:1px solid var(--line);background:var(--card);color:var(--ink);
+    transition:all .15s ease;
+  }
+  .inv-btn-reset:hover{background:var(--paper-2,#ece5d3);border-color:var(--ink)}
+  .inv-btn-download{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  .inv-btn-download:hover{background:var(--accent);border-color:var(--accent)}
+  @media (max-width:720px){
+    .inv-filter-actions{padding:10px 14px}
+    .inv-btn-reset, .inv-btn-download{flex:1;justify-content:center;font-size:11px;padding:8px 10px}
+  }
+
+  .age-badge{
+    display:inline-block;padding:3px 8px;border-radius:4px;font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;
+  }
+  .age-red  {background:#fce8e2;color:var(--accent)}
+  .age-gold {background:#f7f0dc;color:#7a5e16}
+  .age-green{background:#e0e8df;color:var(--accent-2)}
+  .age-grey {background:var(--paper);color:var(--muted)}
+
+  .age-legend{display:flex;flex-wrap:wrap;gap:6px;font-size:10px;font-weight:700}
+  .age-legend span{padding:3px 8px;border-radius:4px;border:1px solid}
+  .age-legend .l-red  {background:#fce8e2;color:var(--accent);border-color:#f4c8b8}
+  .age-legend .l-gold {background:#f7f0dc;color:#7a5e16;border-color:#e2d4a6}
+  .age-legend .l-green{background:#e0e8df;color:var(--accent-2);border-color:#bcd1be}
+
+  /* Brand table — desktop = table, mobile = cards */
+  .inv-brand-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .inv-brand-cards{display:none}
+
+  @media (max-width:720px){
+    .inv-kpis{grid-template-columns:repeat(2,1fr);gap:10px}
+    .inv-kpi{padding:12px 12px 10px}
+    .inv-kpi .ik-value{font-size:22px}
+    .inv-panels{grid-template-columns:1fr;gap:14px}
+    .inv-filters{grid-template-columns:1fr;gap:10px;padding:12px 14px}
+    .inv-table-head{padding:12px 14px}
+    .inv-table thead th, .inv-table tbody td{padding:9px 10px;font-size:11.5px}
+    /* Show cards instead of table on mobile */
+    .inv-brand-table-wrap{display:none}
+    .inv-brand-cards{display:block;padding:14px}
+    .inv-brand-card{
+      background:var(--paper);border:1px solid var(--line);border-radius:8px;
+      padding:12px 14px;margin-bottom:10px;
+    }
+    .inv-brand-card .bc-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px}
+    .inv-brand-card .bc-brand{font-size:14px;font-weight:600;color:var(--ink);line-height:1.2}
+    .inv-brand-card .bc-sub{font-size:10.5px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.04em}
+    .inv-brand-card .bc-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .inv-brand-card .bc-stat{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:8px 6px;text-align:center}
+    .inv-brand-card .bc-stat-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+    .inv-brand-card .bc-stat-val{font-size:14px;font-weight:600;color:var(--ink);margin-top:2px;font-variant-numeric:tabular-nums}
+    .inv-brand-mobile-total{
+      background:var(--ink);color:var(--paper);border-radius:8px;padding:14px;margin:14px;
+    }
+    .inv-brand-mobile-total .imt-label{font-size:10px;text-transform:uppercase;letter-spacing:.06em;opacity:.7;margin-bottom:8px}
+    .inv-brand-mobile-total .imt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+    .inv-brand-mobile-total .imt-cell{font-size:9px;text-transform:uppercase;letter-spacing:.05em;opacity:.7}
+    .inv-brand-mobile-total .imt-cell strong{display:block;font-size:14px;opacity:1;margin-top:2px;font-weight:600}
+  }
+
+  @media (max-width:1100px){
+    .inv-kpis{grid-template-columns:repeat(3,1fr)}
+    .inv-panels{grid-template-columns:1fr}
+  }
+
+  /* ——— Project Composition view styles ——— */
+  .pc-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin:0 0 18px}
+  .pc-kpi{
+    background:var(--card);border:1px solid var(--line);padding:14px 16px 12px;
+    border-radius:8px;position:relative;overflow:hidden;
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .pc-kpi:hover{transform:translateY(-2px);box-shadow:0 8px 24px -12px rgba(26,25,21,.15)}
+  .pc-kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--ink)}
+  .pc-kpi.pc-k-mod::before{background:var(--accent)}
+  .pc-kpi.pc-k-stu::before{background:var(--accent-2)}
+  .pc-kpi.pc-k-svc::before{background:#3b6086}
+  .pc-kpi.pc-k-neo::before{background:#7a5e16}
+  .pc-method-note{
+    background:var(--paper-2); border-left:3px solid var(--ink);
+    padding:10px 14px; margin:-4px 0 18px; border-radius:0 4px 4px 0;
+    font-size:11.5px; line-height:1.5; color:var(--ink);
+  }
+  .pc-method-note strong{color:var(--accent);font-weight:600}
+  .pc-k-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:4px}
+  .pc-k-value{font-family:'Fraunces',serif;font-size:28px;font-weight:500;line-height:1.1;color:var(--ink);letter-spacing:-.01em}
+  .pc-k-unit{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);margin-top:4px}
+
+  .pc-filterbar{
+    background:var(--card);border:1px solid var(--line);border-radius:8px;
+    padding:14px 16px;margin-bottom:18px;
+    display:grid;grid-template-columns:repeat(6,1fr) auto;gap:12px;align-items:end;
+  }
+  .pc-filterbar > div > label{display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:5px}
+  .pc-filterbar select, .pc-filterbar input[type="date"]{
+    width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:5px;
+    background:var(--card);font-family:inherit;font-size:12px;color:var(--ink);
+  }
+  .pc-filterbar select:focus, .pc-filterbar input:focus{outline:none;border-color:var(--ink)}
+  .pc-presets{display:flex;border:1px solid var(--line);border-radius:5px;overflow:hidden}
+  .pc-presets button{
+    flex:1;border:0;background:var(--card);padding:7px 8px;font-family:inherit;font-size:11.5px;
+    cursor:pointer;border-right:1px solid var(--line);color:var(--muted);
+  }
+  .pc-presets button:last-child{border-right:0}
+  .pc-presets button.active{background:var(--ink);color:var(--paper);font-weight:600}
+  .pc-reset{
+    padding:8px 14px;border:1px solid var(--line);background:var(--card);
+    border-radius:5px;cursor:pointer;font-family:inherit;font-size:12px;color:var(--ink);
+    transition:all .15s ease;align-self:end;
+  }
+  .pc-reset:hover{background:var(--paper-2);border-color:var(--ink)}
+
+  .pc-card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:18px;margin-bottom:18px}
+  .pc-card-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+  .pc-card-h h3{margin:0;font-size:14px;font-weight:600;color:var(--ink)}
+  .pc-card-sub{color:var(--muted);font-size:11px}
+  .pc-stack-bar{display:flex;height:36px;border-radius:6px;overflow:hidden;border:1px solid var(--line);background:var(--paper-2)}
+  .pc-stack-seg{display:flex;align-items:center;justify-content:center;color:white;font-size:11px;font-weight:600;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 6px;transition:flex .25s ease}
+  .pc-stack-seg.mod{background:var(--accent)}
+  .pc-stack-seg.neo{background:#7a5e16}
+  .pc-stack-seg.stu{background:var(--accent-2)}
+  .pc-stack-seg.svc{background:#3b6086}
+  .pc-mix-legend{display:flex;gap:18px;margin-top:12px;flex-wrap:wrap;font-size:12px}
+  .pc-mix-legend span{display:flex;align-items:center;gap:6px;color:var(--ink)}
+  .pc-mix-legend i{width:11px;height:11px;border-radius:2px;display:inline-block;flex-shrink:0}
+  .pc-mix-legend .v{font-family:'JetBrains Mono',monospace;color:var(--muted);font-size:11px;margin-left:4px}
+
+  .pc-layout{display:grid;grid-template-columns:1fr 380px;gap:18px;margin-bottom:18px}
+  .pc-byloc, .pc-bytype{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px}
+  .pc-byloc h3, .pc-bytype h3{margin:0 0 12px;font-size:13px;font-weight:600;color:var(--ink)}
+  .pc-bd-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:11.5px}
+  .pc-bd-row:last-child{border:0}
+  .pc-bd-row .lbl{width:96px;flex-shrink:0;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pc-bd-row .bar{flex:1;display:flex;height:14px;border-radius:3px;overflow:hidden;border:1px solid var(--line);background:var(--paper-2)}
+  .pc-bd-row .bar > div{height:100%}
+  .pc-bd-row .total{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);width:72px;text-align:right;flex-shrink:0}
+
+  .pc-detail{background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:28px}
+  .pc-detail-h{padding:14px 18px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);gap:12px;flex-wrap:wrap}
+  .pc-detail-h h3{margin:0;font-size:14px;font-weight:600;color:var(--ink)}
+  .pc-detail-sub{font-size:11px;color:var(--muted);margin-top:2px}
+  .pc-detail-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .pc-search{
+    padding:7px 11px;border:1px solid var(--line);border-radius:5px;
+    font-family:inherit;font-size:12px;width:180px;background:var(--card);color:var(--ink);
+  }
+  .pc-search:focus{outline:none;border-color:var(--ink)}
+  .pc-btn{padding:7px 13px;border:1px solid var(--line);background:var(--card);border-radius:5px;cursor:pointer;font-family:inherit;font-size:11.5px;color:var(--ink);transition:all .15s ease;display:inline-flex;align-items:center;gap:3px}
+  .pc-btn:hover{background:var(--paper-2)}
+  .pc-btn-dark{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  .pc-btn-dark:hover{background:var(--accent);border-color:var(--accent)}
+
+  .pc-tbl-wrap{overflow-x:auto;max-height:560px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .pc-tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+  .pc-tbl th{position:sticky;top:0;background:var(--ink);color:var(--paper);padding:10px 8px;text-align:left;font-weight:600;letter-spacing:.04em;font-size:10.5px;text-transform:uppercase;z-index:2;border-bottom:0;white-space:nowrap}
+  .pc-tbl th.num{text-align:right}
+  .pc-tbl td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .pc-tbl td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .pc-tbl tbody tr:hover{background:var(--paper-2)}
+  .pc-pid{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted)}
+  .pc-pval{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--ink)}
+  .pc-chip{display:inline-block;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:600;white-space:nowrap}
+  .pc-chip-loc{background:#f0eadb;color:var(--ink)}
+  .pc-chip-typ{background:#e0e8df;color:var(--accent-2)}
+  .pc-mini-stack{display:flex;width:120px;height:14px;border-radius:3px;overflow:hidden;border:1px solid var(--line);background:var(--paper-2)}
+  .pc-mini-stack > div{height:100%}
+  .pc-pct{font-family:'JetBrains Mono',monospace;font-size:10.5px;display:inline-block;width:36px;text-align:right}
+  .pc-pct.mod{color:var(--accent);font-weight:600}
+  .pc-pct.neo{color:#7a5e16;font-weight:600}
+  .pc-pct.stu{color:var(--accent-2);font-weight:600}
+  .pc-pct.svc{color:#3b6086;font-weight:600}
+  .pc-pct.zero{color:#c9c5bc;font-weight:400}
+  .pc-tfoot td{
+    padding:12px 8px;font-weight:700;background:var(--paper-2);color:var(--ink);
+    border-top:2px solid var(--ink);position:sticky;bottom:0;z-index:2;
+  }
+
+  @media (max-width:1100px){
+    .pc-kpis{grid-template-columns:repeat(2,1fr)}
+    .pc-filterbar{grid-template-columns:repeat(3,1fr);gap:10px}
+    .pc-reset{grid-column:span 3;width:100%}
+    .pc-layout{grid-template-columns:1fr}
+  }
+  @media (max-width:720px){
+    .pc-kpis{grid-template-columns:1fr 1fr;gap:10px}
+    .pc-k-value{font-size:22px}
+    .pc-filterbar{grid-template-columns:1fr 1fr;gap:10px;padding:12px 14px}
+    .pc-reset{grid-column:span 2}
+    .pc-stack-seg{font-size:10px;padding:0 4px}
+    .pc-search{width:140px}
+    /* Hide some columns on phones */
+    .pc-tbl th:nth-child(2), .pc-tbl td:nth-child(2),
+    .pc-tbl th:nth-child(3), .pc-tbl td:nth-child(3){display:none}
+    .pc-tbl{font-size:11px}
+    .pc-tbl th, .pc-tbl td{padding:7px 5px;white-space:nowrap}
+    .pc-mini-stack{width:80px}
+    .pc-pct{width:30px;font-size:10px}
+  }
+
+  /* KPI row — scrolls naturally with content (not sticky) */
+  .kpis{
+    display:grid;grid-template-columns:repeat(6,1fr);gap:14px;
+    margin:0 0 28px;
+  }
+  .kpi{
+    background:var(--card);border:1px solid var(--line);padding:18px 18px 16px;
+    border-radius:6px;position:relative;overflow:hidden;
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .kpi:hover{transform:translateY(-2px);box-shadow:0 8px 24px -12px rgba(26,25,21,.15)}
+  .kpi .k-label{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  .kpi .k-value{font-family:'Fraunces',serif;font-weight:500;font-size:32px;letter-spacing:-.02em;color:var(--ink);line-height:1}
+  .kpi .k-value .k-denom{color:var(--muted);font-weight:400;font-size:22px}
+  .kpi .k-unit{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);margin-top:6px}
+  .kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent)}
+  .kpi.k-green::before{background:var(--accent-2)}
+  .kpi.k-gold::before{background:var(--accent-3)}
+  .kpi.k-blue::before{background:var(--accent-4)}
+  .kpi.k-red::before{background:var(--danger)}
+  .kpi.k-ink::before{background:var(--ink)}
+
+  /* charts grid */
+  .grid{display:grid;gap:18px;margin-bottom:18px}
+  .g-2{grid-template-columns:1.4fr 1fr}
+  .g-3{grid-template-columns:1.6fr 1fr}
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:6px;padding:20px 22px;
+  }
+  .card h2{
+    font-family:'Fraunces',serif;font-weight:500;font-size:16px;margin:0 0 4px;letter-spacing:-.01em;
+  }
+  .card .card-sub{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;margin-bottom:14px}
+  .chart-wrap{position:relative;height:280px}
+  .chart-wrap.tall{height:340px}
+
+  /* table */
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--line)}
+  th{
+    font-family:'Inter',sans-serif;font-weight:500;font-size:10.5px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--muted);background:transparent;
+    position:sticky;top:0;background:var(--card);
+  }
+  td.num,th.num{text-align:right;font-family:'JetBrains Mono',monospace;font-feature-settings:"tnum"}
+  tbody tr:hover{background:var(--paper)}
+  tr.total-row td{font-weight:600;border-top:2px solid var(--ink);border-bottom:none;font-family:'Fraunces',serif;font-size:14px}
+  tr.total-row td.num{font-family:'JetBrains Mono',monospace;font-weight:600}
+
+  .scroll-table{max-height:360px;overflow-y:auto;overflow-x:auto;border-radius:4px;-webkit-overflow-scrolling:touch}
+  .scroll-table::-webkit-scrollbar{width:6px;height:6px}
+  .scroll-table::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+
+  .badge{
+    display:inline-block;padding:2px 7px;border-radius:999px;font-size:10.5px;
+    font-family:'JetBrains Mono',monospace;
+  }
+  .badge-modular{background:rgba(184,66,31,.1);color:var(--accent)}
+  .badge-neo{background:rgba(74,91,163,.1);color:var(--accent-4)}
+  .badge-studio{background:rgba(200,161,61,.15);color:#8a6e22}
+  .badge-service{background:rgba(46,74,58,.1);color:var(--accent-2)}
+  .badge-others{background:rgba(122,118,109,.15);color:var(--muted)}
+  .badge-shopify{
+    background:rgba(46,74,58,.12);color:#1b5f3e;
+    font-weight:500;letter-spacing:.04em;
+  }
+  /* Recommendation pills for EC Inventory */
+  .rec{
+    display:inline-block;padding:2px 8px;border-radius:3px;
+    font-size:10.5px;font-weight:500;letter-spacing:.04em;
+    white-space:nowrap;
+  }
+  .rec-discontinue{background:rgba(166,48,48,.1);color:var(--danger)}
+  .rec-review{background:rgba(200,161,61,.18);color:#7a5e16}
+  .rec-active{background:rgba(46,74,58,.1);color:var(--accent-2)}
+
+  /* Date preset buttons */
+  .ec-presets{display:inline-flex;gap:0;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .preset-btn{
+    background:var(--card);border:none;border-right:1px solid var(--line);
+    padding:6px 11px;cursor:pointer;font-family:inherit;
+    font-size:10.5px;color:var(--muted);letter-spacing:.04em;
+    transition:background .12s, color .12s;
+  }
+  .preset-btn:last-child{border-right:none}
+  .preset-btn:hover{color:var(--ink)}
+  .preset-btn.active{background:var(--ink);color:var(--paper)}
+  .preset-btn.active:hover{color:var(--paper)}
+
+  /* Compact numeric cells in EC table */
+  #tbl-ec td.num,#tbl-ec th.num{font-size:12px}
+  #tbl-ec td.dim{color:var(--muted)}
+
+  /* tabs for bottom section */
+  .tabs{display:flex;gap:0;border-bottom:1px solid var(--line);margin-bottom:16px}
+  .tab{
+    padding:10px 18px;cursor:pointer;font-size:12px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;
+  }
+  .tab.active{color:var(--ink);border-bottom-color:var(--accent)}
+  .tab:hover{color:var(--ink)}
+  .tab-count{
+    font-family:'JetBrains Mono',monospace;font-size:10px;margin-left:6px;
+    background:var(--paper-2);padding:1px 6px;border-radius:999px;color:var(--ink-2);
+  }
+
+  .loading{
+    display:flex;align-items:center;justify-content:center;min-height:60vh;
+    font-family:'Fraunces',serif;font-style:italic;font-size:20px;color:var(--muted);
+  }
+  .error-box{
+    margin:40px auto;max-width:700px;padding:24px;border:1px solid var(--danger);
+    background:rgba(166,48,48,.05);border-radius:6px;color:var(--danger);
+  }
+  .error-box h3{margin-top:0;font-family:'Fraunces',serif}
+  .error-box code{background:var(--card);padding:2px 6px;border-radius:3px;font-size:12px}
+
+  /* Responsive: tablet */
+  @media (max-width:1100px){
+    .kpis{grid-template-columns:repeat(3,1fr)}
+    .g-2,.g-3{grid-template-columns:1fr}
+    main{grid-template-columns:1fr}
+    aside.filters{
+      position:static;max-height:none;border-right:none;
+      border-bottom:1px solid var(--line);padding:20px 24px;
+    }
+    header.topbar{position:relative}
+    .canvas{padding:24px 28px 60px}
+  }
+
+  /* Responsive: mobile */
+  @media (max-width:720px){
+    header.topbar{
+      padding:16px 18px 12px;flex-direction:column;
+      align-items:flex-start;gap:8px;
+    }
+    .title{font-size:22px}
+    .sub{font-size:11px}
+    .topbar-right{font-size:11px;flex-wrap:wrap}
+    .canvas{padding:18px 14px 48px}
+
+    /* Filters: collapsible drawer */
+    aside.filters{
+      padding:14px 16px;
+      max-height:none;
+    }
+    aside.filters h3{margin-top:14px;font-size:10px}
+    .filter-group{max-height:140px;font-size:13px}
+
+    /* KPI tiles — 2 per row on phones, NOT sticky (would eat half the screen) */
+    .kpis{
+      grid-template-columns:repeat(2,1fr);gap:10px;
+      position:static;background:transparent;backdrop-filter:none;
+      margin:0 0 20px;padding:0;border-bottom:none;
+    }
+    .kpi{padding:14px 12px 12px}
+    .kpi .k-label{font-size:9px;letter-spacing:.1em}
+    .kpi .k-value{font-size:22px}
+    .kpi .k-unit{font-size:10px;margin-top:4px}
+
+    /* Cards tighter */
+    .card{padding:16px 14px}
+    .card h2{font-size:14px}
+    .card .card-sub{font-size:10px;letter-spacing:.08em;margin-bottom:10px}
+    .chart-wrap{height:220px}
+    .chart-wrap.tall{height:280px}
+
+    /* Tables: hide less-critical columns, shrink font */
+    table{font-size:12px}
+    th,td{padding:7px 6px}
+    th{font-size:9.5px;letter-spacing:.06em}
+
+    /* Hide Brand column on the 3 product tables to fit phone screens */
+    #tbl-dead th:nth-child(3), #tbl-dead td:nth-child(3),
+    #tbl-fast th:nth-child(3), #tbl-fast td:nth-child(3),
+    #tbl-slow th:nth-child(3), #tbl-slow td:nth-child(3){display:none}
+    /* Hide Backend Type on dead-stock (still visible in tooltips), and Qty on fast/slow */
+    #tbl-dead th:nth-child(4), #tbl-dead td:nth-child(4){display:none}
+    #tbl-fast th:nth-child(6), #tbl-fast td:nth-child(6),
+    #tbl-slow th:nth-child(6), #tbl-slow td:nth-child(6){display:none}
+
+    /* Brand Analysis tab — 10 cols won't fit. Hide Main (col 1), Slow (col 9),
+       and Slow Rev (col 10). Brand + Sub-Cat + the 5 dead metrics remain. */
+    #tbl-brand th:nth-child(1), #tbl-brand td:nth-child(1),
+    #tbl-brand th:nth-child(9), #tbl-brand td:nth-child(9),
+    #tbl-brand th:nth-child(10), #tbl-brand td:nth-child(10){display:none}
+    /* On phones, allow brand table to scroll horizontally as a last resort */
+    #tbl-brand{font-size:11px}
+    #tbl-brand th, #tbl-brand td{padding:6px 5px;white-space:nowrap}
+
+    /* Tab layout */
+    .tabs{flex-wrap:wrap}
+    .tab{padding:8px 10px;font-size:10px;letter-spacing:.06em}
+    .tab-actions{flex-direction:column;gap:10px;align-items:stretch}
+    .tab-actions .download-btn{align-self:flex-start}
+
+    /* Date inputs stack */
+    .date-row{flex-wrap:wrap}
+    .date-row input{min-width:130px}
+
+    /* Pill container */
+    .pills{gap:3px}
+    .pill{font-size:10.5px;padding:2px 6px}
+
+    /* Collapsible filters drawer on mobile */
+    .filters-toggle{display:inline-block !important}
+    aside.filters{display:none}
+    aside.filters.open{display:block}
+  }
+
+  .filters-toggle{
+    display:none;
+    background:var(--ink);color:var(--paper);
+    border:none;border-radius:4px;padding:6px 12px;
+    font-family:inherit;font-size:11px;letter-spacing:.08em;
+    text-transform:uppercase;cursor:pointer;
+  }
+  .filters-toggle:hover{background:var(--accent)}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div>
+    <div class="title">Sales <em>Dashboard</em></div>
+    
+  </div>
+  <div class="topbar-right">
+    <button class="filters-toggle" id="filtersToggle" aria-label="Toggle filters">☰ Filters</button>
+    <span id="status">Loading…</span>
+    <span class="mono" id="lastRange">—</span>
+  </div>
+</header>
+
+<main>
+  <aside class="filters">
+    <div id="active-filters-wrap" style="display:none">
+      <div class="active-filters-head">
+        <span>Active filters</span>
+        <button class="clear-link" id="resetBtn2">clear all</button>
+      </div>
+      <div class="pills" id="active-pills"></div>
+    </div>
+
+    <h3>Date Range <button class="clear-link" data-clear="date">reset</button></h3>
+    <div class="date-row">
+      <input type="date" id="dateFrom" />
+      <span>→</span>
+      <input type="date" id="dateTo" />
+    </div>
+
+    <h3>Options</h3>
+    <label class="option-toggle">
+      <input type="checkbox" id="excludePid" checked>
+      <span>Exclude one-off products (containing "PID")</span>
+    </label>
+
+    <h3>Shopify <button class="clear-link" data-clear="shopify">reset</button></h3>
+    <div class="filter-group" id="f-shopify">
+      <label><input type="radio" name="shopifyFilter" value="all" checked><span>All products</span></label>
+      <label><input type="radio" name="shopifyFilter" value="yes"><span>On Shopify only</span></label>
+      <label><input type="radio" name="shopifyFilter" value="no"><span>Not on Shopify</span></label>
+    </div>
+
+    <h3>Branch <button class="clear-link" data-clear="branch">clear</button></h3>
+    <div class="filter-group" id="f-branch"></div>
+
+    <h3>Main Category <button class="clear-link" data-clear="default">clear</button></h3>
+    <div class="filter-group" id="f-default"></div>
+
+    <h3>Brand <button class="clear-link" data-clear="brand">clear</button></h3>
+    <input class="filter-search" id="s-brand" placeholder="Filter brands…" />
+    <div class="filter-group" id="f-brand"></div>
+
+    <h3>Category <button class="clear-link" data-clear="category">clear</button></h3>
+    <input class="filter-search" id="s-category" placeholder="Filter categories…" />
+    <div class="filter-group" id="f-category"></div>
+
+    <button class="reset-btn" id="resetBtn">Reset all filters</button>
+  </aside>
+
+  <section class="canvas" id="canvas">
+    <div class="loading" id="loader">Loading data…</div>
+    <div id="main-content" style="display:none">
+
+      <div class="view-toggle" role="tablist">
+        <button id="vtoggle-sales" class="active" data-view="sales">Sales Dashboard</button>
+        <button id="vtoggle-inventory" data-view="inventory">Inventory Analysis</button>
+        <button id="vtoggle-projcomp" data-view="projcomp">Project Composition</button>
+      </div>
+
+      <div id="view-sales">
+      <div class="kpis">
+        <div class="kpi k-ink">
+          <div class="k-label">Total Revenue</div>
+          <div class="k-value"><span id="kpi-revenue">—</span></div>
+          <div class="k-unit">₹ Crores</div>
+        </div>
+        <div class="kpi k-gold">
+          <div class="k-label">Discontinued Revenue</div>
+          <div class="k-value"><span id="kpi-discontinued">—</span></div>
+          <div class="k-unit">₹ Cr · <span id="kpi-discontinued-sub">—</span></div>
+        </div>
+        <div class="kpi k-green">
+          <div class="k-label">Total Projects</div>
+          <div class="k-value"><span id="kpi-projects">—</span></div>
+          <div class="k-unit">unique PKOs</div>
+        </div>
+        <div class="kpi k-red">
+          <div class="k-label">Dead Stock</div>
+          <div class="k-value">
+            <span id="kpi-dead">—</span><span class="k-denom"> / <span id="kpi-dead-total">—</span></span>
+          </div>
+          <div class="k-unit">never used in PKO</div>
+        </div>
+        <div class="kpi">
+          <div class="k-label">Fast Moving</div>
+          <div class="k-value">
+            <span id="kpi-fast">—</span><span class="k-denom"> / <span id="kpi-active-total">—</span></span>
+          </div>
+          <div class="k-unit">&gt;5 projects, of used SKUs</div>
+        </div>
+        <div class="kpi k-blue">
+          <div class="k-label">Slow Moving</div>
+          <div class="k-value">
+            <span id="kpi-slow">—</span><span class="k-denom"> / <span id="kpi-active-total-2">—</span></span>
+          </div>
+          <div class="k-unit">≤5 projects, of used SKUs</div>
+        </div>
+      </div>
+
+      <div class="grid g-2">
+        <div class="card">
+          <h2>Revenue by month</h2>
+          <div class="card-sub">₹ Crores · trending across fiscal period</div>
+          <div class="chart-wrap"><canvas id="chart-month"></canvas></div>
+          <div class="chart-hint">click a month to filter</div>
+        </div>
+        <div class="card">
+          <h2>Revenue by Main Category</h2>
+          <div class="card-sub">₹ Crores · per Default Category</div>
+          <div class="chart-wrap"><canvas id="chart-default"></canvas></div>
+          <div class="chart-hint">click a bar to filter by type</div>
+        </div>
+      </div>
+
+      <div class="grid g-3">
+        <div class="card">
+          <h2>Top Categories by Revenue</h2>
+          <div class="card-sub">₹ Crores · horizontal leaderboard (top 12)</div>
+          <div class="chart-wrap tall"><canvas id="chart-category"></canvas></div>
+          <div class="chart-hint">click a category to filter</div>
+        </div>
+        <div class="card">
+          <h2>Monthly breakdown</h2>
+          <div class="card-sub">projects and revenue per month</div>
+          <div class="scroll-table">
+            <table id="tbl-month">
+              <thead><tr><th>Month</th><th class="num">Projects</th><th class="num">Revenue (₹)</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <div class="tabs">
+          <div class="tab active" data-tab="dead">Dead Stock <span class="tab-count" id="cnt-dead">0</span></div>
+          <div class="tab" data-tab="fast">Fast Moving <span class="tab-count" id="cnt-fast">0</span></div>
+          <div class="tab" data-tab="slow">Slow Moving <span class="tab-count" id="cnt-slow">0</span></div>
+          <div class="tab" data-tab="discontinued">Discontinued <span class="tab-count" id="cnt-discontinued">0</span></div>
+          <div class="tab" data-tab="ec">EC Inventory <span class="tab-count" id="cnt-ec">0</span></div>
+        </div>
+
+        <div id="tab-dead" class="tab-pane">
+          <div class="tab-actions">
+            <div>
+              <h2 style="margin:0 0 4px">Products in Studio · never used in any PKO</h2>
+              <div class="card-sub">filtered by current brand/category selection · top 500 shown</div>
+            </div>
+            <button class="download-btn" data-dl="dead">
+              <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 12l-4-4h3V2h2v6h3l-4 4zm-6 4v2h12v-2H4z"/></svg>
+              Download CSV
+            </button>
+          </div>
+          <div class="scroll-table" style="max-height:480px">
+            <table id="tbl-dead">
+              <thead><tr>
+                <th>Variant Name</th><th>Category</th><th>Brand</th>
+                <th>Backend Type</th><th>ERP Code</th><th>Shopify</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="tab-fast" class="tab-pane" style="display:none">
+          <div class="tab-actions">
+            <div>
+              <h2 style="margin:0 0 4px">Fast-moving products · used in more than 5 projects</h2>
+              <div class="card-sub">sorted by project count · top 500 shown</div>
+            </div>
+            <button class="download-btn" data-dl="fast">
+              <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 12l-4-4h3V2h2v6h3l-4 4zm-6 4v2h12v-2H4z"/></svg>
+              Download CSV
+            </button>
+          </div>
+          <div class="scroll-table" style="max-height:480px">
+            <table id="tbl-fast">
+              <thead><tr>
+                <th>Product Name</th><th>Category</th><th>Brand</th>
+                <th>ERP Code</th><th class="num">Projects</th><th class="num">Qty</th><th class="num">Revenue (₹)</th><th>Shopify</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="tab-slow" class="tab-pane" style="display:none">
+          <div class="tab-actions">
+            <div>
+              <h2 style="margin:0 0 4px">Slow-moving products · 1–5 projects</h2>
+              <div class="card-sub">ranked by fewest projects first · top 500 shown</div>
+            </div>
+            <button class="download-btn" data-dl="slow">
+              <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 12l-4-4h3V2h2v6h3l-4 4zm-6 4v2h12v-2H4z"/></svg>
+              Download CSV
+            </button>
+          </div>
+          <div class="scroll-table" style="max-height:480px">
+            <table id="tbl-slow">
+              <thead><tr>
+                <th>Product Name</th><th>Category</th><th>Brand</th>
+                <th>ERP Code</th><th class="num">Projects</th><th class="num">Qty</th><th class="num">Revenue (₹)</th><th>Shopify</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="tab-discontinued" class="tab-pane" style="display:none">
+          <div class="empty-tab">
+            <div>
+              <h2 style="margin:0 0 6px">Discontinued Products</h2>
+              <p style="margin:0 0 4px;color:var(--ink-2);font-size:13px">
+                Products used in past PKOs but no longer in the Studio catalog.
+              </p>
+              <p style="margin:0 0 24px;color:var(--muted);font-size:12px;line-height:1.5">
+                These aren't part of your current offering, so we don't show the full list.
+                Download the CSV when you need it — typically for cleaning historical data
+                or checking what's been removed from the catalog.
+              </p>
+              <button class="download-btn download-btn-prominent" data-dl="discontinued">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 12l-4-4h3V2h2v6h3l-4 4zm-6 4v2h12v-2H4z"/></svg>
+                Download <span id="discontinued-count">0</span> discontinued products
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-ec" class="tab-pane" style="display:none">
+          <div class="tab-actions">
+            <div>
+              <h2 style="margin:0 0 4px">EC Inventory · slow movers by Expert Centre</h2>
+              <div class="card-sub">demand vs branch usage · for inventory optimization</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <div class="ec-presets">
+                <button class="preset-btn" data-preset="3m">Last 3M</button>
+                <button class="preset-btn active" data-preset="6m">Last 6M</button>
+                <button class="preset-btn" data-preset="12m">Last 12M</button>
+                <button class="preset-btn" data-preset="all">All</button>
+              </div>
+              <button class="download-btn" data-dl="ec">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 12l-4-4h3V2h2v6h3l-4 4zm-6 4v2h12v-2H4z"/></svg>
+                Download CSV
+              </button>
+            </div>
+          </div>
+          <div class="card-sub" id="ec-window-label" style="margin-top:-4px;margin-bottom:12px">window: last 6 months</div>
+          <div class="scroll-table" style="max-height:540px">
+            <table id="tbl-ec">
+              <thead>
+                <tr>
+                  <th>Product Name</th>
+                  <th>Category</th>
+                  <th>Brand</th>
+                  <th>ERP Code</th>
+                  <th class="num">HSR</th>
+                  <th class="num">HRBR</th>
+                  <th class="num">Thane</th>
+                  <th class="num">Andheri</th>
+                  <th class="num">M-Dev</th>
+                  <th class="num">Total Proj</th>
+                  <th class="num">Revenue (₹)</th>
+                  <th class="num">Last Used</th>
+                  <th>Recommendation</th>
+                  <th>Shopify</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="tab-brand" class="tab-pane" style="display:none"></div>
+      </div>
+
+      </div><!-- end #view-sales -->
+
+      <div id="view-inventory" style="display:none">
+
+        <section class="inv-section">
+          <div class="inv-section-title">Inventory Optimization Dashboard</div>
+          <div class="inv-section-sub">Apr 2025 – May 2026 · Studio dump · live computed from filters</div>
+
+          <div class="inv-kpis">
+            <div class="inv-kpi k-orange">
+              <div class="ik-label">Dead Stock</div>
+              <div class="ik-value" id="ikpi-dead">—</div>
+              <div class="ik-sub">SKUs never used in any PKO</div>
+            </div>
+            <div class="inv-kpi k-rose">
+              <div class="ik-label">Dead Value</div>
+              <div class="ik-value" id="ikpi-deadval">—</div>
+              <div class="ik-sub">Crores catalog value idle</div>
+            </div>
+            <div class="inv-kpi k-amber">
+              <div class="ik-label">Old Dead (&gt;1 yr)</div>
+              <div class="ik-value" id="ikpi-old">—</div>
+              <div class="ik-sub" id="ikpi-old-sub">true delist candidates</div>
+            </div>
+            <div class="inv-kpi k-yellow">
+              <div class="ik-label">Slow Movers</div>
+              <div class="ik-value" id="ikpi-slow">—</div>
+              <div class="ik-sub">SKUs inside 1-5 projects only</div>
+            </div>
+            <div class="inv-kpi k-green">
+              <div class="ik-label">Slow Revenue</div>
+              <div class="ik-value" id="ikpi-slowrev">—</div>
+              <div class="ik-sub">Crores earned by slow movers</div>
+            </div>
+            <div class="inv-kpi k-teal">
+              <div class="ik-label">Discontinued</div>
+              <div class="ik-value" id="ikpi-disc">—</div>
+              <div class="ik-sub" id="ikpi-disc-sub">already billed; legacy ERPs</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="inv-panels">
+          <div class="inv-panel">
+            <h3 class="inv-panel-title">
+              <span style="display:inline-block;width:8px;height:8px;background:var(--ink);border-radius:50%"></span>
+              Top 4 Strategic Findings
+            </h3>
+            <div class="finding">
+              <div class="finding-num" style="background:#b45309">1</div>
+              <div>
+                <div class="finding-title">69% of dead stock is over 1 year old</div>
+                <div class="finding-body">4,705 SKUs sitting unused 12+ months. 2,394 over 36 months. <span class="finding-cta">Start here.</span></div>
+              </div>
+            </div>
+            <div class="finding">
+              <div class="finding-num" style="background:var(--accent)">2</div>
+              <div>
+                <div class="finding-title">Studio holds 96% of total dead value</div>
+                <div class="finding-body">4,693 dead SKUs · ₹9.14 Cr — Loose Furniture + Wall Arts lead. <span class="finding-cta">Biggest action area.</span></div>
+              </div>
+            </div>
+            <div class="finding">
+              <div class="finding-num" style="background:#a16207">3</div>
+              <div>
+                <div class="finding-title">₹7.28 Cr "discontinued" already billed</div>
+                <div class="finding-body">Mostly service line items (ODP, Electrical, WPC) against legacy codes. <span class="finding-cta">Catalog hygiene only.</span></div>
+              </div>
+            </div>
+            <div class="finding">
+              <div class="finding-num" style="background:var(--accent-2)">4</div>
+              <div>
+                <div class="finding-title">Slow movers earned ₹8.96 Cr</div>
+                <div class="finding-body">2,711 SKUs sold inconsistently — under-promoted, not dead. <span class="finding-cta">Training + sampling.</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="inv-panel inv-panel-dark defs">
+            <h3 class="inv-panel-title">What each metric means</h3>
+            <dl>
+              <dt class="d-orange">DEAD STOCK</dt>
+              <dd>SKUs onboarded with ZERO usage in any PKO across Apr 2025 – May 2026.</dd>
+              <dt class="d-rose">DEAD VALUE</dt>
+              <dd>Catalog selling value of dead SKUs (BNG SP or MUM SP). Not procurement cost.</dd>
+              <dt class="d-amber">OLD DEAD (&gt;1 yr)</dt>
+              <dd>Dead SKUs in Studio for over 12 months. Most actionable for delisting.</dd>
+              <dt class="d-yellow">SLOW MOVERS</dt>
+              <dd>SKUs used in 1 to 5 PKO projects in LAST 6 MONTHS. At risk of turning dead.</dd>
+              <dt class="d-teal">DISCONTINUED</dt>
+              <dd>PKO sales billed against ERP codes no longer in Studio. Mostly service line items already collected.</dd>
+            </dl>
+          </div>
+        </section>
+
+        <section class="inv-table-wrap">
+          <div class="inv-table-head">
+            <h3>Dead Stock + Slow Movers · per Main Sourcing Group</h3>
+            <div class="sub">live aggregation from current filters</div>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="inv-table" id="inv-main-table">
+              <thead>
+                <tr>
+                  <th>Sourcing</th>
+                  <th class="num">Dead SKUs</th>
+                  <th class="num">Dead Value (₹Cr)</th>
+                  <th class="num">Slow SKUs</th>
+                  <th class="num">Slow Revenue (₹Cr)</th>
+                  <th class="num">Total Affected</th>
+                  <th class="ctr">Priority</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+              <tfoot></tfoot>
+            </table>
+          </div>
+        </section>
+
+        <section class="inv-table-wrap">
+          <div class="inv-table-head">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
+              <div>
+                <h3>By Sub-Sourcing &amp; Brand · with Age</h3>
+                <div class="sub">Value in Lakhs (₹L). Age = months since SKU creation.</div>
+              </div>
+              <div class="age-legend">
+                <span class="l-red">Red 24+ mo — True Delist</span>
+                <span class="l-gold">Gold 12-24 mo — Review</span>
+                <span class="l-green">Green &lt;12 mo — Incubation</span>
+              </div>
+            </div>
+          </div>
+          <div class="inv-filters">
+            <div>
+              <label>Filter Main Sourcing</label>
+              <select id="inv-filter-main">
+                <option value="ALL">All Main Tracks</option>
+                <option value="Studio">Studio</option>
+                <option value="Modular">Modular</option>
+                <option value="Neo Modular">Neo Modular</option>
+                <option value="Service">Service</option>
+              </select>
+            </div>
+            <div>
+              <label>Filter Sub-Sourcing Group</label>
+              <select id="inv-filter-sub">
+                <option value="ALL">All Sub-Groups</option>
+              </select>
+            </div>
+            <div>
+              <label>Filter Age Risk Profile</label>
+              <select id="inv-filter-age">
+                <option value="ALL">All Inventory Tiers</option>
+                <option value="CRITICAL">Critical Dead (24+ months)</option>
+                <option value="WARNING">Review / Stagnant (12-24 months)</option>
+                <option value="NEW">Recent Additions (&lt;12 months)</option>
+              </select>
+            </div>
+          </div>
+          <div class="inv-filter-actions">
+            <button class="inv-btn-reset" id="inv-reset-btn" type="button">
+              <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor" style="vertical-align:-2px;margin-right:4px"><path d="M10 3a7 7 0 1 0 6.93 6h-2.02A5 5 0 1 1 10 5v2.5l4-3.5-4-3.5V3z"/></svg>
+              Reset filters
+            </button>
+            <button class="inv-btn-download" id="inv-csv-btn" type="button">
+              <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor" style="vertical-align:-2px;margin-right:4px"><path d="M10 12l-4-4h3V2h2v6h3l-4 4zm-6 4v2h12v-2H4z"/></svg>
+              Download CSV (filtered SKUs)
+            </button>
+          </div>
+          <div class="inv-brand-table-wrap">
+            <table class="inv-table" id="inv-brand-table">
+              <thead>
+                <tr>
+                  <th>Main</th>
+                  <th>Sub-Sourcing</th>
+                  <th>Brand</th>
+                  <th class="num">Total</th>
+                  <th class="num">Dead</th>
+                  <th class="num">Dead %</th>
+                  <th class="ctr">Avg Age (mo)</th>
+                  <th class="num">Dead Value (₹L)</th>
+                  <th class="num">Slow</th>
+                  <th class="num">Slow Rev (₹L)</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+              <tfoot></tfoot>
+            </table>
+          </div>
+          <div class="inv-brand-cards" id="inv-brand-cards"></div>
+        </section>
+
+      </div><!-- end #view-inventory -->
+
+      <div id="view-projcomp" style="display:none">
+        <section class="inv-section">
+          <div class="inv-section-title">Project Composition</div>
+          <div class="inv-section-sub">Per-PID product split · revenue mix across Modular, Neo Modular, Studio, Service</div>
+        </section>
+
+        <!-- KPI strip — 4 locations + avg project value -->
+        <div class="pc-kpis">
+          <div class="pc-kpi pc-k-mod">
+            <div class="pc-k-label">HSR</div>
+            <div class="pc-k-value" id="pc-loc-hsr">—</div>
+            <div class="pc-k-unit" id="pc-loc-hsr-sub">— PKOs</div>
+          </div>
+          <div class="pc-kpi pc-k-stu">
+            <div class="pc-k-label">HRBR</div>
+            <div class="pc-k-value" id="pc-loc-hrbr">—</div>
+            <div class="pc-k-unit" id="pc-loc-hrbr-sub">— PKOs</div>
+          </div>
+          <div class="pc-kpi pc-k-svc">
+            <div class="pc-k-label">Andheri</div>
+            <div class="pc-k-value" id="pc-loc-andheri">—</div>
+            <div class="pc-k-unit" id="pc-loc-andheri-sub">— PKOs</div>
+          </div>
+          <div class="pc-kpi pc-k-neo">
+            <div class="pc-k-label">Thane</div>
+            <div class="pc-k-value" id="pc-loc-thane">—</div>
+            <div class="pc-k-unit" id="pc-loc-thane-sub">— PKOs</div>
+          </div>
+          <div class="pc-kpi">
+            <div class="pc-k-label">Avg Project Value</div>
+            <div class="pc-k-value" id="pc-kpi-avgval">—</div>
+            <div class="pc-k-unit">per PKO (₹ L)</div>
+          </div>
+        </div>
+        <div class="pc-method-note">
+          <strong>How shares are calculated:</strong> for each PKO, we count the number of line items per Main category (Modular / Neo Modular / Studio / Service), then divide by that PKO's total line items.
+          <br>
+          <span style="color:var(--muted)">Example: a project with 80 Modular line items + 10 Studio + 5 Neo Modular + 5 Service = 100 total → Modular 80%, Studio 10%, Neo 5%, Service 5%. We use item count (not revenue) so a small number of expensive items doesn't skew the picture. Project Value is shown only as project size context.</span>
+        </div>
+
+        <!-- Filter bar -->
+        <section class="pc-filterbar">
+          <div>
+            <label>Location</label>
+            <select id="pc-filter-location">
+              <option value="ALL">All locations</option>
+            </select>
+          </div>
+          <div>
+            <label>Project Type</label>
+            <select id="pc-filter-type">
+              <option value="ALL">All types</option>
+            </select>
+          </div>
+          <div>
+            <label>Category (Main)</label>
+            <select id="pc-filter-cat">
+              <option value="ALL">All categories</option>
+              <option value="Modular">Modular</option>
+              <option value="Neo Modular">Neo Modular</option>
+              <option value="Studio">Studio</option>
+              <option value="Service">Service</option>
+            </select>
+          </div>
+          <div>
+            <label>From</label>
+            <input type="date" id="pc-filter-from">
+          </div>
+          <div>
+            <label>To</label>
+            <input type="date" id="pc-filter-to">
+          </div>
+          <div>
+            <label>Quick</label>
+            <div class="pc-presets">
+              <button type="button" data-pc-preset="3m">3M</button>
+              <button type="button" data-pc-preset="6m">6M</button>
+              <button type="button" class="active" data-pc-preset="all">All</button>
+            </div>
+          </div>
+          <button type="button" id="pc-reset-btn" class="pc-reset">↺ Reset</button>
+        </section>
+
+        <!-- Headline stacked bar -->
+        <section class="pc-card">
+          <div class="pc-card-h">
+            <h3>Overall Product Type Mix · filtered total</h3>
+            <div class="pc-card-sub" id="pc-bar-sub">based on Project Value (₹) — load data to populate</div>
+          </div>
+          <div class="pc-stack-bar" id="pc-stack-bar"></div>
+          <div class="pc-mix-legend" id="pc-mix-legend"></div>
+        </section>
+
+        <!-- Two side-by-side breakdowns: Location + Project Type -->
+        <section class="pc-layout">
+          <div class="pc-byloc">
+            <h3>Location</h3>
+            <div id="pc-byloc-rows"></div>
+          </div>
+          <div class="pc-bytype">
+            <h3>Project Type</h3>
+            <div id="pc-bytype-rows"></div>
+          </div>
+        </section>
+
+        <!-- PID detail table -->
+        <section class="pc-detail">
+          <div class="pc-detail-h">
+            <div>
+              <h3>PID-level detail · Product split per project</h3>
+              <div class="pc-detail-sub" id="pc-detail-sub">— PKOs · each row shows that PID's product type split by revenue</div>
+            </div>
+            <div class="pc-detail-actions">
+              <input type="search" class="pc-search" id="pc-search" placeholder="Search PID...">
+              <button class="pc-btn pc-btn-dark" id="pc-csv-btn" type="button">
+                <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor" style="vertical-align:-2px;margin-right:4px"><path d="M10 12l-4-4h3V2h2v6h3l-4 4zm-6 4v2h12v-2H4z"/></svg>
+                Download CSV
+              </button>
+            </div>
+          </div>
+          <div class="pc-tbl-wrap">
+            <table class="pc-tbl">
+              <thead>
+                <tr>
+                  <th>PID</th>
+                  <th>Location</th>
+                  <th>Type</th>
+                  <th class="num">Project ₹</th>
+                  <th>Product Split</th>
+                  <th class="num">Mod</th>
+                  <th class="num">Neo</th>
+                  <th class="num">Stu</th>
+                  <th class="num">Svc</th>
+                </tr>
+              </thead>
+              <tbody id="pc-tbody"></tbody>
+              <tfoot id="pc-tfoot"></tfoot>
+            </table>
+          </div>
+        </section>
+
+      </div><!-- end #view-projcomp -->
+
+    </div>
+    <div id="error-container"></div>
+  </section>
+</main>
+
+<script>
+/* =========================================================
+   PKO Sales Dashboard — single-file, GitHub-Pages friendly
+   ========================================================= */
+
+const SALES_FILE  = 'Sales_PKO.csv';
+const STUDIO_FILE = 'Studio_Dump_for_PKO_Sales.csv';
+
+const STATE = {
+  sales: [],
+  studio: [],
+  filters: {
+    branches:new Set(), brands:new Set(), categories:new Set(),
+    defaults:new Set(), dateFrom:null, dateTo:null,
+    excludePid:true,
+    shopifyFilter:'all',
+  },
+  ecWindow: '6m',          // EC report window: '3m' | '6m' | '12m' | 'all'
+  charts: {},
+  lastDead: [], lastFast: [], lastSlow: [],   // cached for CSV download
+  lastEC: [],
+};
+
+const PALETTE = {
+  accent:'#b8421f', green:'#2e4a3a', gold:'#c8a13d', blue:'#4a5ba3',
+  ink:'#1a1915', muted:'#7a766d', line:'#e3ded3',
+};
+
+const DEFAULT_LABELS = {
+  'type_modular':'Modular',
+  'type_neo_modular':'Neo Modular',
+  'type_bonito_studio':'Studio',
+  'type_service':'Service',
+  'type_others':'Others',
+  'type_discontinued':'Discontinued',
+};
+
+const BADGE_CLASS = {
+  'type_modular':'badge-modular',
+  'type_neo_modular':'badge-neo',
+  'type_bonito_studio':'badge-studio',
+  'type_service':'badge-service',
+  'type_others':'badge-others',
+};
+
+/* ——— EC (Expert Centre) labels ———
+   Maps internal branch codes to user-friendly EC names. Used in the
+   EC Inventory report. Easy to extend / rename. */
+const EC_LABELS = {
+  'BNG - HSR':   'HSR',
+  'BNG - HRBR':  'HRBR',
+  'MUM - Thane': 'Thane',
+  'MUM - GOR':   'Andheri',
+  'Mumbai-Dev':  'Mumbai-Dev',
+};
+// Display order for branch columns in the EC report
+const EC_ORDER = ['BNG - HSR','BNG - HRBR','MUM - Thane','MUM - GOR','Mumbai-Dev'];
+
+/* ——— Canonical category whitelist ———
+   The CSV data contains typos, stray spaces, and legacy category names.
+   We normalize & whitelist so the UI only shows real categories.
+   To add a new category, just append to this list. */
+const CANONICAL_CATEGORIES = [
+  'Wardrobe Accessories','Internal Tandem','Carpentry','MDF Beading','False ceiling',
+  'Home Services','Acrylic Sheet','Modular Furniture','Transportation','Civil',
+  'POP Cornice','Handles','Wallpapers','Wooden Leg','Cushion',
+  'Kitchen Accessories ( Tall Unit )','Laminates','Saint Gobain Profile',
+  'Kitchen Accessories','Edgebanding','Painting','Hardware','Panels','Quartz',
+  'Ceiling Lights','Concealed Lights','Spot lights','Services','Wooden Flooring',
+  'Inbuilt Microwave Oven','Dishwasher','Inbuilt Top','Chimney','Sink',
+  'Decor lights','Wall Lights','Hanging/Pendent Lights','Membrane Finish','Lights',
+  'Glass Partition','Panel Lights','Focus Light','PU Finish','Microwave Oven',
+  'Appliances','Installation','Modular','Other Hardwares',
+  'Kitchen Accessories ( Wall Unit )','Granite','PU Shutter','Cleaning',
+  'Profile Handles','Kitchen Accessories ( Corner Units )','GK Handles',
+  'Sarom Platinum Swatches','Aluminium Profile Shutter','Headboard','Shelving System',
+  'Hardware.','SS Strip','Groove Shutters','Cots','Bed','Others','Home Automation',
+  'Home Decor','Accessories','Dining Table','Chairs','Storage Unit','Sofa',
+  'Metal Fabrication','Table','Side Tables','CNC with Duco','Glass & Mirror',
+  'ODP Cabinet','GK Wallpapers','Safety Door','Gold','Platinum','Diamond',
+  'Painting Services','Crystal Acrylic Finish','Crystal Acrylic Shutter',
+  'Led Mirrors','Decorative Door','Solid Wooden Beading','Royal Touche Laminates',
+  'Designer Glass','Ottomans & Stools','Coffee Tables','Bar Closet','Sliding System',
+  'Outdoor Loose Furniture','Loose Furniture','Reference Library','Charcoal Beading',
+  'Sofa cum Bed','Aadeshwar Swatches','Wall Arts','Furniture lights','WPC Rafters',
+  'Aristo Shutter ( without carcass )','Recliners','Groove Panel','Bonito Edge Profile',
+  'Accessories(Loose Furniture)','Dining','Bonito Legs','Imported Glass',
+  'LED Bulbs and Strips','Acrylic','Aluminum Profile Partition','Ibed Swatches',
+  'Safe Locker','Kitchen Hardware','Cooktop','Hob','Inbuilt Oven','Pooja Unit',
+  'Febonic Swatches','Invisible Bed','New Point Creation',
+  'Switchboard Shifting & Modification','Board Closing & Termination',
+  'General Electrical Work','Creation / Shifting of Fan Point','Light Installation',
+  'Light Point Creation / Shifting','Removal of Fitting','Bed Fitting',
+  'Sarom Diamond Swatches','Sarom Gold Swatches','Membrane Shutters','Offers',
+  'Rug','Laminates 0.8mm','Prelam Edgebanding','Soisu Swatches','Benches','Console',
+];
+
+// Build lookup: normalized-lowercase → canonical name (handles typos, trailing spaces)
+const CATEGORY_CANONICAL_MAP = (()=>{
+  const map = new Map();
+  CANONICAL_CATEGORIES.forEach(c=>{
+    const k = c.trim().toLowerCase().replace(/\s+/g,' ').replace(/\.+$/,'');
+    map.set(k, c);
+  });
+  return map;
+})();
+
+// Map any raw category string to its canonical form, or null if not recognized
+function canonicalCategory(raw){
+  if(!raw) return null;
+  const k = String(raw).trim().toLowerCase().replace(/\s+/g,' ').replace(/\.+$/,'');
+  return CATEGORY_CANONICAL_MAP.get(k) || null;
+}
+
+/* ——— Sub-Category bucketing ———
+   Maps each Studio SKU into a curated Main → Sub-Category bucket per CDO spec.
+   Used by the Brand Analysis tab. Returns {main, sub} or null if no bucket fits.
+   The order of checks matters — each SKU goes into the FIRST bucket it matches. */
+function subCategoryOf(row){
+  const cat = (row.category || row.categoryRaw || '').toLowerCase();
+  const brand = (row.brand || '').toLowerCase();
+  const bpt = row.backendType;
+  // Helper: does category contain any of these keywords?
+  const has = (...kws) => kws.some(k => cat.includes(k.toLowerCase()));
+
+  // Beading: override main to Service per CDO request
+  if(has('beading')) return {main:'Service', sub:'Beading'};
+
+  if(bpt === 'type_modular'){
+    if(has('laminate')) return {main:'Modular', sub:'Laminates (all brands)'};
+    if(has('edgebanding')) return {main:'Modular', sub:'Edgebanding'};
+    if(has('membrane shutter')) return {main:'Modular', sub:'Membrane Shutters'};
+    if(has('carpentry')) return {main:'Modular', sub:'Carpentry items'};
+    if(has('pu finish')) return {main:'Modular', sub:'PU Finish'};
+    if(has('aluminium profile shutter','crystal acrylic','acrylic','profile handles','groove shutters','acrylic sheet'))
+      return {main:'Modular', sub:'Aluminium / Acrylic / Profile shutters'};
+    if(has('board','panel')) return {main:'Modular', sub:'Boards / Panels'};
+    if(has('hardware')) return {main:'Modular', sub:'Hardware'};
+    if(has('accessor')) return {main:'Modular', sub:'Accessories'};
+    if(has('membrane finish','bed','service','wallpaper'))
+      return {main:'Modular', sub:'Misc Modular (Membrane Finish, Bed)'};
+    return {main:'Modular', sub:'Other Modular'};
+  }
+
+  if(bpt === 'type_neo_modular'){
+    if(has('wardrobe accessor')) return {main:'Neo Modular', sub:'Wardrobe Accessories'};
+    if(has('aluminium profile shutter','aluminum profile partition','aristo shutter','glass partition'))
+      return {main:'Neo Modular', sub:'Aluminium Profile Shutters & Partitions'};
+    if(has('kitchen accessor','kitchen hardware'))
+      return {main:'Neo Modular', sub:'Kitchen Accessories (all)'};
+    if(has('handle')) return {main:'Neo Modular', sub:'Handles (incl. Profile, GK, Sujin)'};
+    if(has('glass & mirror','imported glass')) return {main:'Neo Modular', sub:'Glass & Mirror'};
+    if(has('hardware')) return {main:'Neo Modular', sub:'Hardware'};
+    return {main:'Neo Modular', sub:'Other Neo Modular'};
+  }
+
+  if(bpt === 'type_bonito_studio'){
+    if(has('bed','sofa','chair','table','loose furniture','recliner','ottoman','cot','bench','console','dining','headboard','storage unit','pooja unit','bar closet'))
+      return {main:'Studio', sub:'Loose Furniture (Beds, Sofas, Tables, Chairs)'};
+    if(has('chimney','sink','hob','cooktop','dishwasher','oven','microwave','inbuilt','appliance','home automation'))
+      return {main:'Studio', sub:'Appliances'};
+    if(has('wallpaper')) return {main:'Studio', sub:'Wallpaper'};
+    if(has('wall art')) return {main:'Studio', sub:'Wall Arts'};
+    if(has('rug')) return {main:'Studio', sub:'Rugs'};
+    if(has('light','lamp','bulb','mirror','pendant')) return {main:'Studio', sub:'Lights'};
+    if(has('quartz','granite')) return {main:'Studio', sub:'Quartz / Granite'};
+    if(has('wpc')) return {main:'Studio', sub:'WPC Rafters'};
+    if(has('handle')) return {main:'Studio', sub:'Handles'};
+    if(has('home decor','pots','planters')) return {main:'Studio', sub:'Home Decor'};
+    if(has('leg')) return {main:'Studio', sub:'Bonito Legs (tagged as Studio)'};
+    if(has('safety door','decorative door','designer glass')) return {main:'Studio', sub:'Doors'};
+    if(has('wooden flooring','ss strip')) return {main:'Studio', sub:'Flooring'};
+    if(has('offers')) return {main:'Studio', sub:'Offers (combos)'};
+    return {main:'Studio', sub:'Other Studio'};
+  }
+
+  if(bpt === 'type_service'){
+    if(has('paint')) return {main:'Service', sub:'Paints'};
+    if(has('electric','switchboard','point','light installation','board closing','fan point','removal of fitting'))
+      return {main:'Service', sub:'Electrical'};
+    if(has('cleaning')) return {main:'Service', sub:'Cleaning'};
+    if(has('civil','false ceiling','pop cornice')) return {main:'Service', sub:'Civil Works'};
+    return {main:'Service', sub:'Other Services (small categories)'};
+  }
+  return null;
+}
+
+/* ———  helpers ——— */
+const fmtCr  = v => (v/1e7).toLocaleString('en-IN',{maximumFractionDigits:2, minimumFractionDigits:2});
+const fmtL   = v => (v/1e5).toLocaleString('en-IN',{maximumFractionDigits:2, minimumFractionDigits:2});
+const fmtN   = v => v.toLocaleString('en-IN');
+const fmtINR = v => '₹ '+Math.round(v).toLocaleString('en-IN');
+
+function parseDMY(s){
+  if(!s) return null;
+  // "02-04-2025" -> Date
+  const [d,m,y] = s.split('-').map(Number);
+  if(!d||!m||!y) return null;
+  return new Date(y, m-1, d);
+}
+function ymKey(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function ymLabel(key){
+  const [y,m] = key.split('-');
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return months[+m-1]+' '+y;
+}
+
+/* ——— load ——— */
+// Use fetch first so we get a real HTTP status and error message.
+// Then hand the text to PapaParse. This tells us *why* a file fails.
+async function loadCsv(path){
+  let resp;
+  try{
+    resp = await fetch(path);
+  }catch(e){
+    throw new Error(`Network error fetching "${path}" — ${e.message}`);
+  }
+  if(!resp.ok){
+    throw new Error(`Couldn't load "${path}" — HTTP ${resp.status} ${resp.statusText}. `
+      +`Check that the filename matches exactly (case-sensitive on GitHub) and the file is in the same folder as index.html.`);
+  }
+  const text = await resp.text();
+  if(text.trim().startsWith('<')){
+    throw new Error(`"${path}" returned HTML instead of CSV. `
+      +`This usually means the file is missing and GitHub served a 404 page. `
+      +`Check the exact filename in your repo.`);
+  }
+  const parsed = Papa.parse(text, {header:true, skipEmptyLines:true});
+  if(parsed.errors && parsed.errors.length){
+    console.warn('CSV parse warnings for',path,parsed.errors.slice(0,3));
+  }
+  return parsed.data;
+}
+
+// Try loading a single CSV; return its rows on success, [] silently on 404.
+// Anything else (network failure, server error) still throws.
+async function tryLoadCsv(path){
+  let resp;
+  try{
+    resp = await fetch(path);
+  }catch(e){
+    throw new Error(`Network error fetching "${path}" — ${e.message}`);
+  }
+  if(resp.status === 404) return null;     // file doesn't exist — silently skip
+  if(!resp.ok){
+    throw new Error(`Couldn't load "${path}" — HTTP ${resp.status} ${resp.statusText}.`);
+  }
+  const text = await resp.text();
+  if(text.trim().startsWith('<')) return null;   // 404 page disguised as 200
+  const parsed = Papa.parse(text, {header:true, skipEmptyLines:true});
+  return parsed.data;
+}
+
+// Load PKO sales from the live API — hits ClickHouse via /api/dashboard?view=sales.
+// Replaces the old CSV-year-probing. The API returns rows in the same shape
+// the dashboard expects (ERP Code, Amount, Qty, Brand, Category, etc.) so the
+// rest of the pipeline is unchanged. See netlify/functions/dashboard.js.
+async function fetchJson(view){
+  const r = await fetch(`/api/dashboard?view=${view}`);
+  if(!r.ok){
+    const txt = await r.text().catch(()=>'');
+    throw new Error(`API ${view} returned ${r.status}: ${txt.slice(0,200)}`);
+  }
+  return r.json();
+}
+
+// Shape-adapters: convert what the API returns (snake_case fields from SQL)
+// into the exact CSV-row shape the existing coercion code expects.
+// This way we didn't rewrite the dashboard, just the loader.
+function salesRowFromApi(row){
+  return {
+    'Project No':       row.project_no,
+    'PKO Date':         row.pko_date ? new Date(row.pko_date).toLocaleDateString('en-GB').replace(/\//g,'-') : '',
+    'Branch':           row.branch || '',  // backfilled from projects pull
+    'ERP Code':         row.erp_code || '',
+    'Qty':              row.qty || 0,
+    'Amount':           row.amount || 0,
+    'Item Name':        row.product_name || '',
+    'Product Name':     row.product_name || '',
+    'Category':         row.category || '',
+    'Brand':            row.brand || '',
+    'Default Category': row.default_category || '',
+    'Project Value':    row.project_value || 0,     // backfilled from projects pull
+    'Project Type':     row.project_type_label || '',  // backfilled, mapped to Turnkey/Sub/Stylist
+  };
+}
+function studioRowFromApi(row){
+  return {
+    'Product ID':             '',  // not surfaced from API
+    'Product Name':           row.product_name || '',
+    'Variant Name':           row.variant_name || '',
+    'ERP Code':               row.erp_code || '',
+    'Brand':                  row.brand || '',
+    'Category':               row.category || '',
+    'Backend Product Types':  row.default_category || '',
+    'City':                   '',
+    'BNG SP':                 row.bng_sp || 0,
+    'MUM SP':                 row.mum_sp || 0,
+    'Created Date':           row.created_date || '',
+    'Status':                 row.status === 1 ? 'Active' : 'Inactive',
+    'Shopify Products':       '',
+  };
+}
+
+// Map Postgres project_type enum → label the dashboard shows
+// 1=Turnkey, 5=Sub-project, 8=Stylist (confirmed by distinct-value query)
+const PROJECT_TYPE_LABELS = { 1:'Turnkey', 5:'Sub', 8:'Stylist', 0:'Other', 2:'Other', 4:'Other' };
+
+async function loadSalesFiles(){
+  // 1. Pull the two heavy views from ClickHouse in parallel with the Postgres meta
+  const [salesApi, projectsApi] = await Promise.all([
+    fetchJson('sales'),
+    fetchJson('projects'),
+  ]);
+  // 2. Build a quick lookup: project_no -> {project_value, project_type_label, branch}
+  const metaByPno = new Map();
+  for(const p of projectsApi){
+    metaByPno.set(String(p.project_no), {
+      project_value: p.project_value || 0,
+      project_type_label: PROJECT_TYPE_LABELS[p.project_type] || 'Other',
+      branch: p.branch || '',
+    });
+  }
+  // 3. Merge meta into each sales row, then convert to CSV-shape
+  const merged = salesApi.map(r => {
+    const meta = metaByPno.get(String(r.project_no));
+    if(meta){
+      r.project_value = meta.project_value;
+      r.project_type_label = meta.project_type_label;
+      r.branch = meta.branch;
+    }
+    return salesRowFromApi(r);
+  });
+  console.log(`[PKO] Loaded ${salesApi.length} sales rows, ${projectsApi.length} project meta rows from API`);
+  return {rows: merged, years: ['live']};
+}
+// Separate helper for studio — called by init() in place of loadCsv(STUDIO_FILE)
+async function loadStudioFromApi(){
+  const api = await fetchJson('studio');
+  console.log(`[PKO] Loaded ${api.length} studio rows from API`);
+  return api.map(studioRowFromApi);
+}
+
+async function init(){
+  const status = document.getElementById('status');
+  try{
+    const [salesResult, studio] = await Promise.all([
+      loadSalesFiles(),
+      loadStudioFromApi(),
+    ]);
+    const sales = salesResult.rows;
+    STATE._loadedYears = salesResult.years;
+
+    // Normalize ERP: strip whitespace + uppercase, so 'hwht123 ' === 'HWHT123'
+    const normErp = s => (s||'').toString().trim().toUpperCase();
+    // Some ERPs have logic-variant suffixes in the Studio dump — e.g.
+    // 'BD-VRM-2024-3161', 'BD-VRM-2024-3161_WITH_MDF', 'BD-VRM-2024-3161_WITHOUT_MDF'
+    // all represent the SAME physical product. If any variant is used in a PKO,
+    // none should count as dead. We strip ONLY these known suffixes — never
+    // arbitrary '_NNN' suffixes, because those are often genuinely different
+    // SKUs (Phantom_141 vs Phantom_142 are separate products).
+    const LOGIC_SUFFIX_RE = /_(WITH_?MDF|WITHOUT_?MDF)$/i;
+    const baseErp = e => e ? e.replace(LOGIC_SUFFIX_RE, '') : e;
+
+    /* Parse the Studio dump's "Created Date". Handles the common formats:
+       - "2019-12-14 13:19:35 +0530"     (most rows, ISO + space-separated TZ)
+       - "2024-08-29"                     (some rows)
+       - "27-08-2024"                     (DD-MM-YYYY rare)
+       Returns a Date object, or null if unparseable. */
+    function parseStudioDate(raw){
+      if(!raw) return null;
+      const s = String(raw).trim();
+      if(!s) return null;
+      // Format: "YYYY-MM-DD HH:MM:SS +HHMM" — needs explicit reformat for Safari/older browsers
+      let m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})\s*([+-])(\d{2}):?(\d{2})?$/);
+      if(m){
+        const iso = `${m[1]}T${m[2]}${m[3]}${m[4]}:${m[5]||'00'}`;
+        const d = new Date(iso);
+        return isNaN(d.getTime()) ? null : d;
+      }
+      // Format: "YYYY-MM-DD" or "YYYY-MM-DD HH:MM:SS" (no tz)
+      m = s.match(/^(\d{4}-\d{2}-\d{2})([ T]\d{2}:\d{2}:\d{2})?$/);
+      if(m){
+        const d = new Date(s.replace(' ','T'));
+        return isNaN(d.getTime()) ? null : d;
+      }
+      // Format: "DD-MM-YYYY"
+      m = s.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+      if(m){
+        const d = new Date(`${m[3]}-${m[2]}-${m[1]}T00:00:00`);
+        return isNaN(d.getTime()) ? null : d;
+      }
+      // Last resort — let the browser try
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    // Detect one-off PID products by name
+    const PID_RE = /\bPID[\s:\-]*\d*/i;
+    const isPid = r => PID_RE.test(r['Product Name']||'') || PID_RE.test(r['Item Name']||'');
+
+    // Coerce sales
+    STATE.sales = sales.map(r=>{
+      const erp = normErp(r['ERP Code']);
+      return {
+        projectNo: r['Project No'],
+        date: parseDMY(r['PKO Date']),
+        branch: (r['Branch']||'').trim(),
+        erp,
+        baseErp: baseErp(erp),
+        qty: parseFloat(r['Qty'])||0,
+        amount: parseFloat(r['Amount'])||0,
+        itemName: r['Item Name']||'',
+        productName: r['Product Name']||'',
+        category: canonicalCategory(r['Category']) || (r['Category']||'').trim(),
+        categoryRaw: (r['Category']||'').trim(),
+        categoryRecognized: canonicalCategory(r['Category']) !== null,
+        brand: (r['Brand']||'').trim(),
+        defaultCategory: (r['Default Category']||'').trim(),
+        // ——— Project-level fields (new columns added to Sales CSVs) ———
+        projectValue: parseFloat(String(r['Project Value']||'').replace(/[,\s]/g,'')) || 0,
+        projectType: (r['Project Type']||'').trim(),
+        // backendType from Sales 'Default Category' (e.g. type_modular, type_neo_modular, type_bonito_studio, type_service)
+        backendType: (r['Default Category']||'').trim(),
+        isPid: isPid(r),
+      };
+    }).filter(r=>r.date);
+
+    STATE.studio = studio.map(r=>{
+      const erp = normErp(r['ERP Code']);
+      const rawBng = (r['BNG SP']||'').toString().trim();
+      const rawMum = (r['MUM SP']||'').toString().trim();
+      const bngSpNum = parseFloat(rawBng);
+      const mumSpNum = parseFloat(rawMum);
+      const hasBngPrice = rawBng !== '' && !isNaN(bngSpNum) && bngSpNum > 0;
+      const hasMumPrice = rawMum !== '' && !isNaN(mumSpNum) && mumSpNum > 0;
+      // Parse 'Created Date' — format is usually "2019-12-14 13:19:35 +0530"
+      // which the bare Date() constructor fails on. Use the dedicated helper.
+      const createdDate = parseStudioDate(r['Created Date']);
+      return {
+        productId: r['Product ID'],
+        productName: r['Product Name']||'',
+        variantName: r['Variant Name']||'',
+        erp,
+        baseErp: baseErp(erp),
+        isLogicVariant: erp !== baseErp(erp),
+        hasPrice: hasBngPrice || hasMumPrice,
+        brand: (r['Brand']||'').trim(),
+        category: canonicalCategory(r['Category']) || (r['Category']||'').trim(),
+        categoryRaw: (r['Category']||'').trim(),
+        categoryRecognized: canonicalCategory(r['Category']) !== null,
+        backendType: (r['Backend Product Types']||'').trim(),
+        city: r['City']||'',
+        bngSp: hasBngPrice ? bngSpNum : 0,
+        mumSp: hasMumPrice ? mumSpNum : 0,
+        bestPrice: hasBngPrice ? bngSpNum : (hasMumPrice ? mumSpNum : 0),
+        createdDate,
+        status: r['Status']||'',
+        onShopify: /^\s*yes\s*$/i.test(r['Shopify Products']||''),
+      };
+    });
+
+    // Diagnostic: log data health to console so we can debug if dead stock looks wrong
+    const studioErps = new Set(STATE.studio.map(r=>r.erp).filter(Boolean));
+    const salesErps  = new Set(STATE.sales.map(r=>r.erp).filter(Boolean));
+    const overlap = [...studioErps].filter(e => salesErps.has(e)).length;
+    console.log('[PKO Dashboard] Data loaded:');
+    console.log('  Sales rows:', STATE.sales.length);
+    console.log('  Studio rows:', STATE.studio.length);
+    console.log('  Unique ERPs in Studio (non-blank):', studioErps.size);
+    console.log('  Unique ERPs in Sales (non-blank):', salesErps.size);
+    console.log('  Overlap (studio ERPs used in sales):', overlap);
+    console.log('  Dead stock (studio ERPs not in sales):', studioErps.size - overlap);
+    if(STATE.studio.length === 0){
+      console.warn('[PKO Dashboard] Studio CSV loaded 0 rows! Check that Studio_Dump_for_PKO_Sales.csv exists and is a real CSV (not a Git LFS pointer).');
+    }
+    // Diagnostic: how many studio rows got a valid Created Date?
+    const withDate = STATE.studio.filter(r => r.createdDate).length;
+    console.log('  Studio rows with parsed Created Date:', withDate, '/', STATE.studio.length);
+    if(withDate === 0 && STATE.studio.length > 0){
+      console.warn('[PKO Dashboard] NO Created Dates parsed! Avg-Age / Old-Dead KPIs will show blanks. First raw value:',
+                   JSON.stringify(STATE.studio[0] && studio[0] && studio[0]['Created Date']));
+    }
+
+    // ——— Pre-compute index caches (done ONCE, dramatically speeds up refresh) ———
+    STATE._studioErpSet = new Set(STATE.studio.map(r=>r.erp).filter(Boolean));
+    STATE._shopifyErpSet = new Set(STATE.studio.filter(r=>r.onShopify).map(r=>r.erp).filter(Boolean));
+
+    // ——— Trust the Studio dump as the source of truth for everything:
+    //     brand ↔ category ↔ backend-type ↔ product name ↔ variant name.
+    //     Sales CSV has data-entry issues: typos like "Bonito Elecrical",
+    //     stale product names (e.g. ERP BD-VRM-2025-0209 shown as "Modular Bed"
+    //     in sales but correctly "Bonito Upholstered Bed - Maddox Fluted Bed
+    //     with Hydraulic Storage" in the Studio master). For every sales row
+    //     whose ERP exists in Studio, we override all these fields. ———
+    const studioByErp = new Map();
+    for(const s of STATE.studio){
+      if(s.erp && !studioByErp.has(s.erp)) studioByErp.set(s.erp, s);
+    }
+    let reassigned = 0, nameFixed = 0;
+    for(const r of STATE.sales){
+      const s = studioByErp.get(r.erp);
+      if(!s) continue;
+      let changed = false;
+      if(s.backendType && r.defaultCategory !== s.backendType){
+        r.defaultCategory = s.backendType; changed = true;
+      }
+      if(s.brand && r.brand !== s.brand){
+        r.brand = s.brand; changed = true;
+      }
+      if(s.category && r.category !== s.category){
+        r.category = s.category;
+        r.categoryRecognized = canonicalCategory(s.category) !== null;
+        changed = true;
+      }
+      // Product name: always trust Studio if present. Prefer variantName
+      // (most descriptive, e.g. "Maddox Fluted Queen Size Bed with Hydraulic
+      // Storage - Gold") over the shorter productName (e.g. just "Bed").
+      const studioName = s.variantName || s.productName;
+      if(studioName && r.productName !== studioName){
+        r.productName = studioName;
+        r.itemName    = studioName;
+        nameFixed++; changed = true;
+      }
+      if(changed) reassigned++;
+    }
+    console.log('  Sales rows corrected from Studio master:', reassigned,
+                '(of which name-fixes:', nameFixed + ')');
+
+    // Build FY label from the years that actually loaded
+    const yrs = STATE._loadedYears || [];
+    let fyLabel = '';
+    if(yrs.length === 1 && yrs[0] === 'legacy'){
+      fyLabel = '';   // legacy single-file mode — no badge
+    } else if(yrs.length === 1){
+      fyLabel = ` · FY${String(yrs[0]).slice(-2)}-${String(yrs[0]+1).slice(-2)}`;
+    } else if(yrs.length > 1){
+      const first = yrs[0], last = yrs[yrs.length-1];
+      fyLabel = ` · FY${String(first).slice(-2)} – FY${String(last).slice(-2)}`;
+    }
+    // Count "sellable" products (matches the dead-stock denominator universe):
+    // excludes logic variants (_WITH_MDF / _WITHOUT_MDF) and unpriced reference rows.
+    // This is the same number shown in the Dead Stock denominator, so the two reconcile.
+    const sellableCount = STATE.studio.filter(s =>
+      s.erp && !s.isLogicVariant && s.hasPrice
+    ).length;
+    status.textContent = `${sellableCount.toLocaleString()} products${fyLabel}`;
+    status.classList.add('loaded');
+
+    buildFilters();
+    document.getElementById('loader').style.display='none';
+    document.getElementById('main-content').style.display='block';
+    refresh();
+  }catch(err){
+    status.textContent = 'Failed to load';
+    status.classList.add('error');
+    document.getElementById('loader').style.display='none';
+    const msg = err && err.message ? err.message : String(err);
+    document.getElementById('error-container').innerHTML = `
+      <div class="error-box">
+        <h3>Couldn't load the CSV files</h3>
+        <p style="font-family:'JetBrains Mono',monospace;background:var(--card);padding:12px;border-radius:4px;font-size:12px;line-height:1.5;color:var(--ink)">${escapeHtml(msg)}</p>
+        <p style="margin-top:18px"><strong>Common fixes:</strong></p>
+        <ul>
+          <li><strong>Check filenames exactly.</strong> GitHub is case-sensitive. The dashboard expects either:
+            <br>· <code>Sales_PKO_2025.csv</code>, <code>Sales_PKO_2026.csv</code> (year-split, FY start year)
+            <br>· or legacy <code>Sales_PKO.csv</code> (single file)
+            <br>plus <code>Studio_Dump_for_PKO_Sales.csv</code></li>
+          <li><strong>Check files are in the repo root</strong>, alongside <code>index.html</code> (not in a subfolder).</li>
+          <li><strong>Test a file directly:</strong> open <code>&lt;your-pages-url&gt;/Sales_PKO_2025.csv</code> in your browser. If you get a 404 or HTML page, the filename is wrong.</li>
+          <li><strong>Opening this file via <code>file://</code> locally?</strong> Browsers block that. Run <code>python3 -m http.server</code> in the folder instead.</li>
+        </ul>
+      </div>`;
+  }
+}
+
+/* ——— filter UI ——— */
+// Single source of truth for filter group -> state set mapping
+const FILTER_GROUPS = {
+  branch:   {setKey:'branches',   groupId:'f-branch',   labeler:null},
+  default:  {setKey:'defaults',   groupId:'f-default',  labeler:v=>DEFAULT_LABELS[v]||v},
+  brand:    {setKey:'brands',     groupId:'f-brand',    labeler:null},
+  category: {setKey:'categories', groupId:'f-category', labeler:null},
+};
+
+function buildFilters(){
+  const branches = [...new Set(STATE.sales.map(r=>r.branch))].sort();
+  const defaults = [...new Set(STATE.sales.map(r=>r.defaultCategory))].sort();
+  const brands   = [...new Set([
+    ...STATE.sales.map(r=>r.brand),
+    ...STATE.studio.map(r=>r.brand),
+  ])].filter(Boolean).sort();
+  // Only show canonical categories that actually appear in the data
+  const presentCats = new Set([
+    ...STATE.sales.map(r=>r.category),
+    ...STATE.studio.map(r=>r.category),
+  ]);
+  const cats = CANONICAL_CATEGORIES.filter(c=>presentCats.has(c));
+
+  renderCheckGroup('f-branch', branches, STATE.filters.branches);
+  renderCheckGroup('f-default', defaults, STATE.filters.defaults, v=>DEFAULT_LABELS[v]||v);
+  renderCheckGroup('f-brand', brands, STATE.filters.brands);
+  renderCheckGroup('f-category', cats, STATE.filters.categories);
+
+  // date bounds
+  const dates = STATE.sales.map(r=>r.date).filter(Boolean).sort((a,b)=>a-b);
+  const min = dates[0], max = dates[dates.length-1];
+  const toISO = d=>d.toISOString().slice(0,10);
+  const df = document.getElementById('dateFrom');
+  const dt = document.getElementById('dateTo');
+  df.min = dt.min = toISO(min);
+  df.max = dt.max = toISO(max);
+  df.value = toISO(min); dt.value = toISO(max);
+  STATE.filters.dateFrom = min; STATE.filters.dateTo = max;
+  STATE._dateMin = min; STATE._dateMax = max;
+
+  df.addEventListener('change', e=>{
+    STATE.filters.dateFrom = e.target.value?new Date(e.target.value):null; scheduleRefresh();
+  });
+  dt.addEventListener('change', e=>{
+    STATE.filters.dateTo = e.target.value?new Date(e.target.value+'T23:59:59'):null; scheduleRefresh();
+  });
+
+  // PID toggle
+  const pidCb = document.getElementById('excludePid');
+  pidCb.checked = STATE.filters.excludePid;
+  pidCb.addEventListener('change', e=>{ STATE.filters.excludePid = e.target.checked; scheduleRefresh(); });
+
+  // Shopify radio filter
+  document.querySelectorAll('input[name="shopifyFilter"]').forEach(radio=>{
+    radio.addEventListener('change', e=>{
+      STATE.filters.shopifyFilter = e.target.value;
+      scheduleRefresh();
+    });
+  });
+
+  // Brand/category searches
+  document.getElementById('s-brand').addEventListener('input',e=>filterChecklist('f-brand',e.target.value));
+  document.getElementById('s-category').addEventListener('input',e=>filterChecklist('f-category',e.target.value));
+
+  // Per-group "clear" links in section headers
+  document.querySelectorAll('.clear-link[data-clear]').forEach(btn=>{
+    btn.addEventListener('click', e=>{
+      e.stopPropagation();
+      const grp = btn.dataset.clear;
+      if(grp === 'date'){
+        df.value = toISO(min); dt.value = toISO(max);
+        STATE.filters.dateFrom = min; STATE.filters.dateTo = max;
+      } else if(grp === 'shopify'){
+        STATE.filters.shopifyFilter = 'all';
+        const allRadio = document.querySelector('input[name="shopifyFilter"][value="all"]');
+        if(allRadio) allRadio.checked = true;
+      } else if(FILTER_GROUPS[grp]){
+        STATE.filters[FILTER_GROUPS[grp].setKey].clear();
+        document.querySelectorAll('#'+FILTER_GROUPS[grp].groupId+' input[type=checkbox]')
+          .forEach(c=>c.checked=false);
+      }
+      refresh();
+    });
+  });
+
+  // Reset all
+  const resetAll = ()=>{
+    Object.values(FILTER_GROUPS).forEach(g=> STATE.filters[g.setKey].clear());
+    document.querySelectorAll('aside .filter-group input[type=checkbox]').forEach(c=>c.checked=false);
+    df.value = toISO(min); dt.value = toISO(max);
+    STATE.filters.dateFrom = min; STATE.filters.dateTo = max;
+    STATE.filters.excludePid = true;
+    pidCb.checked = true;
+    STATE.filters.shopifyFilter = 'all';
+    const allRadio = document.querySelector('input[name="shopifyFilter"][value="all"]');
+    if(allRadio) allRadio.checked = true;
+    refresh();
+  };
+  document.getElementById('resetBtn').addEventListener('click', resetAll);
+  document.getElementById('resetBtn2').addEventListener('click', resetAll);
+
+  // Tabs
+  document.querySelectorAll('.tab').forEach(t=>{
+    t.addEventListener('click',()=>{
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+      t.classList.add('active');
+      document.querySelectorAll('.tab-pane').forEach(p=>p.style.display='none');
+      document.getElementById('tab-'+t.dataset.tab).style.display='block';
+      // Lazy-render if data is stale
+      const stale = STATE._staleTabs || {};
+      const key = t.dataset.tab;
+      if(stale[key]){
+        if(key==='dead') renderDeadTable(stale.dead);
+        else if(key==='fast' || key==='slow') renderMovementTable('tbl-'+key, stale[key]);
+        else if(key==='ec') renderECTable(stale.ec);
+        // discontinued tab has no table render — just download button
+        stale[key] = null;
+      }
+    });
+  });
+
+  // EC date-window preset buttons
+  document.querySelectorAll('.preset-btn[data-preset]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      document.querySelectorAll('.preset-btn[data-preset]').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      STATE.ecWindow = btn.dataset.preset;
+      scheduleRefresh();
+    });
+  });
+
+  // CSV download buttons
+  document.querySelectorAll('.download-btn[data-dl]').forEach(btn=>{
+    btn.addEventListener('click', ()=> downloadCsv(btn.dataset.dl));
+  });
+
+  // Mobile filters toggle
+  const filtersEl = document.querySelector('aside.filters');
+  document.getElementById('filtersToggle').addEventListener('click', ()=>{
+    filtersEl.classList.toggle('open');
+  });
+
+  // Top-level view toggle (Sales / Inventory Analysis)
+  STATE.activeView = 'sales';
+  document.querySelectorAll('.view-toggle button[data-view]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const view = btn.dataset.view;
+      if(view === STATE.activeView) return;
+      STATE.activeView = view;
+      document.querySelectorAll('.view-toggle button').forEach(b => b.classList.toggle('active', b === btn));
+      document.getElementById('view-sales').style.display     = view === 'sales' ? '' : 'none';
+      document.getElementById('view-inventory').style.display = view === 'inventory' ? '' : 'none';
+      document.getElementById('view-projcomp').style.display  = view === 'projcomp' ? '' : 'none';
+      // If inventory view became active and data is stale, compute now
+      if(view === 'inventory' && STATE._invStale){
+        const studio = applyStudioFilters(STATE.studio);
+        const sales  = applySalesFilters(STATE.sales);
+        const brandRows = computeBrandAnalysis(studio, sales);
+        STATE.lastBrand = brandRows;
+        renderInventoryView(studio, sales, brandRows);
+        STATE._invStale = false;
+      }
+      // Same for Project Composition
+      if(view === 'projcomp' && STATE._pcStale){
+        renderProjectComposition();
+        STATE._pcStale = false;
+      }
+    });
+  });
+  // Brand drill filters
+  ['inv-filter-main','inv-filter-sub','inv-filter-age'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+      if(id === 'inv-filter-main'){
+        document.getElementById('inv-filter-sub').value = 'ALL';
+        populateInvSubFilter(STATE._invBrandRows || []);
+      }
+      renderInvBrandTable();
+    });
+  });
+  // Reset all 3 inventory filters
+  const resetBtn = document.getElementById('inv-reset-btn');
+  if(resetBtn){
+    resetBtn.addEventListener('click', () => {
+      document.getElementById('inv-filter-main').value = 'ALL';
+      document.getElementById('inv-filter-sub').value  = 'ALL';
+      document.getElementById('inv-filter-age').value  = 'ALL';
+      populateInvSubFilter(STATE._invBrandRows || []);
+      renderInvBrandTable();
+    });
+  }
+  // CSV download — every SKU matching the active inventory filters
+  const csvBtn = document.getElementById('inv-csv-btn');
+  if(csvBtn){
+    csvBtn.addEventListener('click', () => downloadInventoryCsv());
+  }
+
+  // ——— Project Composition view wiring ———
+  ['pc-filter-location','pc-filter-type','pc-filter-cat','pc-filter-from','pc-filter-to'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.addEventListener('change', renderProjectComposition);
+  });
+  // Quick presets (3M / 6M / All)
+  document.querySelectorAll('.pc-presets button[data-pc-preset]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.pc-presets button').forEach(b => b.classList.toggle('active', b === btn));
+      const preset = btn.dataset.pcPreset;
+      const dt = document.getElementById('pc-filter-to');
+      const df = document.getElementById('pc-filter-from');
+      const toISO = d => d.toISOString().slice(0,10);
+      const max = STATE._dateMax || new Date();
+      dt.value = toISO(max);
+      if(preset === '3m'){
+        df.value = toISO(new Date(max.getTime() - 90*24*3600*1000));
+      } else if(preset === '6m'){
+        df.value = toISO(new Date(max.getTime() - 182*24*3600*1000));
+      } else {
+        df.value = toISO(STATE._dateMin || max);
+      }
+      renderProjectComposition();
+    });
+  });
+  // Reset button
+  const pcReset = document.getElementById('pc-reset-btn');
+  if(pcReset) pcReset.addEventListener('click', pcResetFilters);
+  // Search input — debounce so we don't re-render on every keystroke
+  const pcSearch = document.getElementById('pc-search');
+  if(pcSearch){
+    let pcSearchTimer = null;
+    pcSearch.addEventListener('input', () => {
+      if(pcSearchTimer) clearTimeout(pcSearchTimer);
+      pcSearchTimer = setTimeout(() => pcRenderTable(STATE._pcProjects || []), 150);
+    });
+  }
+  // CSV download
+  const pcCsv = document.getElementById('pc-csv-btn');
+  if(pcCsv) pcCsv.addEventListener('click', pcDownloadCsv);
+}
+
+// Programmatically set a filter value (used when clicking chart elements)
+function toggleFilter(group, value){
+  if(!FILTER_GROUPS[group]) return;
+  const set = STATE.filters[FILTER_GROUPS[group].setKey];
+  if(set.has(value)) set.delete(value); else set.add(value);
+  // Reflect in checkbox UI
+  const labels = document.querySelectorAll('#'+FILTER_GROUPS[group].groupId+' label');
+  labels.forEach(l=>{
+    if(l.dataset.val === value){
+      const cb = l.querySelector('input');
+      if(cb) cb.checked = set.has(value);
+    }
+  });
+  scheduleRefresh();
+}
+function setDateToMonth(ymKey){
+  const [y,m] = ymKey.split('-').map(Number);
+  const from = new Date(y, m-1, 1);
+  const to = new Date(y, m, 0, 23,59,59);
+  STATE.filters.dateFrom = from;
+  STATE.filters.dateTo = to;
+  document.getElementById('dateFrom').value = from.toISOString().slice(0,10);
+  document.getElementById('dateTo').value = to.toISOString().slice(0,10);
+  scheduleRefresh();
+}
+
+function renderCheckGroup(id, values, targetSet, labeler){
+  const host = document.getElementById(id);
+  host.innerHTML='';
+  const frag = document.createDocumentFragment();
+  values.forEach(v=>{
+    const id2 = id+'_'+v.replace(/[^a-z0-9]/gi,'_');
+    const label = document.createElement('label');
+    label.dataset.val = v;
+    label.innerHTML = `<input type="checkbox" id="${id2}"><span>${labeler?labeler(v):v}</span>`;
+    const cb = label.querySelector('input');
+    cb.addEventListener('change',()=>{
+      if(cb.checked) targetSet.add(v); else targetSet.delete(v);
+      scheduleRefresh();
+    });
+    frag.appendChild(label);
+  });
+  host.appendChild(frag);
+}
+function filterChecklist(id, q){
+  q = q.toLowerCase().trim();
+  document.querySelectorAll('#'+id+' label').forEach(l=>{
+    const matches = !q || l.dataset.val.toLowerCase().includes(q);
+    l.classList.toggle('hidden-search', !matches);
+    applyVisibility(l);
+  });
+}
+
+// Single source of truth: a label is visible iff neither cascade nor search has hidden it.
+function applyVisibility(label){
+  const hidden = label.classList.contains('hidden-cascade')
+              || label.classList.contains('hidden-search');
+  label.style.display = hidden ? 'none' : 'flex';
+}
+
+/* ——— filter predicates (tight for-loops; faster than .filter on large arrays) ——— */
+function applySalesFilters(rows){
+  const f = STATE.filters;
+  const hasExcludePid = f.excludePid;
+  const dFrom = f.dateFrom ? +f.dateFrom : null;
+  const dTo   = f.dateTo   ? +f.dateTo   : null;
+  const hasBranch = f.branches.size > 0,   branchSet = f.branches;
+  const hasBrand  = f.brands.size > 0,     brandSet  = f.brands;
+  const hasCat    = f.categories.size > 0, catSet    = f.categories;
+  const hasDef    = f.defaults.size > 0,   defSet    = f.defaults;
+  const shopFilter = f.shopifyFilter;  // 'all' | 'yes' | 'no'
+  const shopifySet = STATE._shopifyErpSet || new Set();
+  const out = [];
+  for(let i=0;i<rows.length;i++){
+    const r = rows[i];
+    if(hasExcludePid && r.isPid) continue;
+    const t = +r.date;
+    if(dFrom !== null && t < dFrom) continue;
+    if(dTo !== null && t > dTo) continue;
+    if(hasBranch && !branchSet.has(r.branch)) continue;
+    if(hasBrand  && !brandSet.has(r.brand)) continue;
+    if(hasCat    && !catSet.has(r.category)) continue;
+    if(hasDef){
+      if(!defSet.has(r.defaultCategory)) continue;
+      // 🔥 extra protection: remove service leakage
+      if(defSet.has('type_bonito_studio') && r.defaultCategory !== 'type_bonito_studio'){
+        continue;
+      }
+    }
+    // Shopify filter — matches against the product's ERP being in the Shopify set
+    if(shopFilter === 'yes' && !shopifySet.has(r.erp)) continue;
+    if(shopFilter === 'no'  &&  shopifySet.has(r.erp)) continue;
+    out.push(r);
+  }
+  return out;
+}
+function applyStudioFilters(rows){
+  const f = STATE.filters;
+  const shopFilter = f.shopifyFilter;  // 'all' | 'yes' | 'no'
+  return rows.filter(r=>{
+    if(f.brands.size     && !f.brands.has(r.brand)) return false;
+    if(f.categories.size && !f.categories.has(r.category)) return false;
+    if(f.defaults.size   && !f.defaults.has(r.backendType)) return false;
+    if(shopFilter === 'yes' && !r.onShopify) return false;
+    if(shopFilter === 'no'  && r.onShopify)  return false;
+    return true;
+  });
+}
+
+/* ——— refresh / render ——— */
+let _refreshTimer = null;
+function scheduleRefresh(){
+  if(_refreshTimer) clearTimeout(_refreshTimer);
+  _refreshTimer = setTimeout(()=>{ _refreshTimer=null; refresh(); }, 50);
+}
+
+function refresh(){
+  const t0 = performance.now();
+  const sales  = applySalesFilters(STATE.sales);
+  const studio = applyStudioFilters(STATE.studio);
+  const studioErpSet = STATE._studioErpSet;
+  
+
+  // Single-pass KPI aggregation
+  let totalRev = 0;
+  let discontinuedRev = 0;
+  const projectsSet = new Set();
+  const salesErps = new Set();              // exact ERPs seen in sales
+  const salesBaseErps = new Set();          // base ERPs (logic-suffix stripped)
+  const discontinuedProjects = new Set();
+  for(let i=0;i<sales.length;i++){
+    const r = sales[i];
+    totalRev += r.amount;
+    projectsSet.add(r.projectNo);
+    if(r.erp){
+      salesErps.add(r.erp);
+      if(r.baseErp) salesBaseErps.add(r.baseErp);
+      if(!studioErpSet.has(r.erp)){
+        discontinuedRev += r.amount;
+        discontinuedProjects.add(r.projectNo);
+      }
+    }
+  }
+  const projects = projectsSet.size;
+
+  // Dead stock: a Studio row counts as dead only if ALL of these hold:
+  //   1. It has an ERP code
+  //   2. It's NOT a logic variant (_WITH_MDF / _WITHOUT_MDF) — we only
+  //      want one row per base product, shown as the canonical base ERP
+  //   3. It has at least one real price (BNG SP or MUM SP) — reference-only
+  //      rows without pricing are catalog placeholders, not sellable stock
+  //   4. Neither the ERP nor any variant of its base has been used in any PKO
+  const dead = studio.filter(s =>
+    s.erp
+    && !s.isLogicVariant
+    && s.hasPrice
+    && !salesErps.has(s.erp)
+    && !salesBaseErps.has(s.baseErp)
+  );
+
+  // Movement — SINGLE PASS aggregation (O(n) instead of O(n*k))
+  const movementMap = new Map();
+  for(let i=0;i<sales.length;i++){
+    const r = sales[i];
+    if(!r.erp) continue;
+    let m = movementMap.get(r.erp);
+    if(!m){
+      m = {erp:r.erp, projects:new Set(), qty:0, revenue:0,
+           productName:r.productName || r.itemName,
+           category:r.category, brand:r.brand, defaultCategory:r.defaultCategory};
+      movementMap.set(r.erp, m);
+    }
+    m.projects.add(r.projectNo);
+    m.qty += r.qty;
+    m.revenue += r.amount;
+  }
+  const movementRows = [];
+  movementMap.forEach(m => movementRows.push({
+    erp:m.erp, projects:m.projects.size, qty:m.qty, revenue:m.revenue,
+    productName:m.productName, category:m.category, brand:m.brand,
+    defaultCategory:m.defaultCategory,
+  }));
+  const fast = movementRows.filter(r=>r.projects>5).sort((a,b)=>b.projects-a.projects);
+  const slow = movementRows.filter(r=>r.projects<=5 && r.projects>0)
+                           .sort((a,b)=>a.projects-b.projects || b.revenue-a.revenue);
+  // ===== DISCONTINUED PRODUCTS =====
+const discontinuedMap = new Map();
+
+for(let i=0;i<sales.length;i++){
+  const r = sales[i];
+
+  if(r.erp && !studioErpSet.has(r.erp)){
+    let d = discontinuedMap.get(r.erp);
+
+    if(!d){
+      d = {
+        erp: r.erp,
+        productName: r.productName || r.itemName,
+        category: r.category,
+        brand: r.brand,
+        projects: new Set(),
+        revenue: 0
+      };
+      discontinuedMap.set(r.erp, d);
+    }
+
+    d.projects.add(r.projectNo);
+    d.revenue += r.amount;
+  }
+}
+
+const discontinued = [...discontinuedMap.values()].map(d=>({
+  ...d,
+  projects: d.projects.size
+})).sort((a,b)=>b.revenue-a.revenue);
+
+STATE.lastDiscontinued = discontinued;
+
+document.getElementById('cnt-discontinued').textContent =
+  discontinued.length.toLocaleString();
+const dcCount = document.getElementById('discontinued-count');
+if(dcCount) dcCount.textContent = discontinued.length.toLocaleString();
+
+  // cache for CSV downloads
+  STATE.lastDead = dead;
+  STATE.lastFast = fast;
+  STATE.lastSlow = slow;
+
+  // Denominators for the X / Total KPI display:
+  // — Dead-stock denom: universe of sellable Studio SKUs under filter
+  //   (must match the same filter rules dead-stock uses, minus the "used" check)
+  const deadDenom = studio.filter(s =>
+    s.erp && !s.isLogicVariant && s.hasPrice
+  ).length;
+  // — Active denom: distinct SKUs used in filtered sales (= fast + slow + any zeros)
+  const activeDenom = fast.length + slow.length;
+
+  document.getElementById('kpi-revenue').textContent  = fmtCr(totalRev);
+  document.getElementById('kpi-discontinued').textContent = fmtCr(discontinuedRev);
+  document.getElementById('kpi-discontinued-sub').textContent =
+    `${fmtN(discontinuedProjects.size)} projects`;
+  document.getElementById('kpi-projects').textContent = fmtN(projects);
+  document.getElementById('kpi-dead').textContent       = fmtN(dead.length);
+  document.getElementById('kpi-dead-total').textContent = fmtN(deadDenom);
+  document.getElementById('kpi-fast').textContent       = fmtN(fast.length);
+  document.getElementById('kpi-active-total').textContent = fmtN(activeDenom);
+  document.getElementById('kpi-slow').textContent       = fmtN(slow.length);
+  document.getElementById('kpi-active-total-2').textContent = fmtN(activeDenom);
+
+  document.getElementById('cnt-dead').textContent = fmtN(dead.length);
+  document.getElementById('cnt-fast').textContent = fmtN(fast.length);
+  document.getElementById('cnt-slow').textContent = fmtN(slow.length);
+
+  // range label
+  const df = STATE.filters.dateFrom, dt = STATE.filters.dateTo;
+  if(df && dt){
+    document.getElementById('lastRange').textContent =
+      df.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})
+      +' — '+
+      dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  }
+
+  renderActivePills();
+  updateFilterOptions();
+  drawMonthChart(sales);
+  drawDefaultChart(sales);
+  drawCategoryChart(sales);
+  renderMonthTable(sales);
+
+  // EC report uses its own time window — compute from full sales (post all
+  // other filters except date), so the EC preset can override the date filter.
+  // Note: still respects branch/brand/category/shopify filters.
+  const ecRows = computeECReport(sales, STATE.ecWindow);
+  STATE.lastEC = ecRows;
+  document.getElementById('cnt-ec').textContent = fmtN(ecRows.length);
+  document.getElementById('ec-window-label').textContent = 'window: ' + ecWindowLabel(STATE.ecWindow);
+
+  // Brand Analysis data — still computed because the Inventory Analysis view consumes it
+  const brandRows = computeBrandAnalysis(studio, sales);
+  STATE.lastBrand = brandRows;
+
+  // Inventory Analysis view — render only if it's active to save time
+  if(STATE.activeView === 'inventory'){
+    renderInventoryView(studio, sales, brandRows);
+  } else {
+    STATE._invStale = true;
+  }
+
+  // Project Composition view — same lazy approach
+  if(STATE.activeView === 'projcomp'){
+    renderProjectComposition();
+  } else {
+    STATE._pcStale = true;
+  }
+
+  // Only render the table for the CURRENTLY VISIBLE tab — saves ~50% table render time
+  const activeTab = document.querySelector('.tab.active')?.dataset.tab || 'dead';
+  if(activeTab === 'dead') renderDeadTable(dead);
+  else if(activeTab === 'fast') renderMovementTable('tbl-fast', fast);
+  else if(activeTab === 'slow') renderMovementTable('tbl-slow', slow);
+  else if(activeTab === 'ec') renderECTable(ecRows);
+  // discontinued tab has no table — count and download button update via main flow
+  // Mark others as stale so they re-render on tab click
+  STATE._staleTabs = {
+    dead: activeTab !== 'dead' ? dead : null,
+    fast: activeTab !== 'fast' ? fast : null,
+    slow: activeTab !== 'slow' ? slow : null,
+    ec: activeTab !== 'ec' ? ecRows : null,
+  };
+
+  console.log('[PKO] refresh:', (performance.now()-t0).toFixed(1), 'ms');
+}
+
+/* ——— active filter pills ——— */
+function renderActivePills(){
+  const f = STATE.filters;
+  const pills = [];
+  if(f.branches.size)   f.branches.forEach(v=> pills.push({type:'Branch',   value:v, group:'branch'}));
+  if(f.defaults.size)   f.defaults.forEach(v=> pills.push({type:'Type',     value:DEFAULT_LABELS[v]||v, raw:v, group:'default'}));
+  if(f.brands.size)     f.brands.forEach(v=>   pills.push({type:'Brand',    value:v, group:'brand'}));
+  if(f.categories.size) f.categories.forEach(v=>pills.push({type:'Category',value:v, group:'category'}));
+
+  const dMin = STATE._dateMin, dMax = STATE._dateMax;
+  const dateNarrowed = dMin && dMax && (+f.dateFrom !== +dMin || +f.dateTo !== +dMax);
+  if(dateNarrowed){
+    pills.push({
+      type:'Date',
+      value: f.dateFrom.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+' – '+
+             f.dateTo.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}),
+      group:'date',
+    });
+  }
+  if(!f.excludePid) pills.push({type:'Options', value:'Including PID products', group:'pid'});
+  if(f.shopifyFilter === 'yes') pills.push({type:'Shopify', value:'On Shopify only', group:'shopify'});
+  if(f.shopifyFilter === 'no')  pills.push({type:'Shopify', value:'Not on Shopify',  group:'shopify'});
+
+  const wrap = document.getElementById('active-filters-wrap');
+  const host = document.getElementById('active-pills');
+  if(!pills.length){ wrap.style.display='none'; host.innerHTML=''; return; }
+  wrap.style.display='block';
+  host.innerHTML = pills.map((p,i)=>`
+    <span class="pill" data-pill-i="${i}">
+      <span class="pill-type">${p.type}:</span>
+      <span>${escapeHtml(p.value)}</span>
+      <button title="Remove">×</button>
+    </span>`).join('');
+  host.querySelectorAll('.pill').forEach((el,i)=>{
+    el.querySelector('button').addEventListener('click',()=>{
+      const p = pills[i];
+      if(p.group === 'date'){
+        STATE.filters.dateFrom = STATE._dateMin; STATE.filters.dateTo = STATE._dateMax;
+        document.getElementById('dateFrom').value = STATE._dateMin.toISOString().slice(0,10);
+        document.getElementById('dateTo').value = STATE._dateMax.toISOString().slice(0,10);
+      } else if(p.group === 'pid'){
+        STATE.filters.excludePid = true;
+        document.getElementById('excludePid').checked = true;
+      } else if(p.group === 'shopify'){
+        STATE.filters.shopifyFilter = 'all';
+        const allRadio = document.querySelector('input[name="shopifyFilter"][value="all"]');
+        if(allRadio) allRadio.checked = true;
+      } else if(FILTER_GROUPS[p.group]){
+        STATE.filters[FILTER_GROUPS[p.group].setKey].delete(p.raw || p.value);
+        // reflect in checkboxes
+        document.querySelectorAll('#'+FILTER_GROUPS[p.group].groupId+' label').forEach(l=>{
+          if(l.dataset.val === (p.raw || p.value)){
+            const cb = l.querySelector('input'); if(cb) cb.checked=false;
+          }
+        });
+      }
+      refresh();
+    });
+  });
+}
+
+/* ——— Cascading filter options ———
+   Recomputes which Main Category / Brand / Category options are *available*
+   given the current selections in the OTHER filter groups.
+
+   KEY DESIGN: The Studio dump is the single source of truth for the
+   Backend-Type ↔ Brand ↔ Category relationships. Sales data contains
+   data-entry errors (typos like "Bonito Elecrical" under type_bonito_studio
+   when the master tags it as type_service) — we don't trust those mappings.
+   Sales data is only used for Branch availability (Studio has no Branch).
+
+   Selected values always stay visible so the user can un-tick them. */
+function updateFilterOptions(){
+  const f = STATE.filters;
+
+  // Build brand/category/type options from the STUDIO dump only.
+  // For each target group, filter studio rows by the OTHER groups' selections
+  // and collect the unique values.
+  function studioAvail(skipGroup){
+    const def = new Set(), brand = new Set(), cat = new Set();
+    for(let i=0;i<STATE.studio.length;i++){
+      const s = STATE.studio[i];
+      if(skipGroup!=='default'  && f.defaults.size   && !f.defaults.has(s.backendType)) continue;
+      if(skipGroup!=='brand'    && f.brands.size     && !f.brands.has(s.brand))         continue;
+      if(skipGroup!=='category' && f.categories.size && !f.categories.has(s.category))  continue;
+      if(s.backendType) def.add(s.backendType);
+      if(s.brand)       brand.add(s.brand);
+      if(s.category)    cat.add(s.category);
+    }
+    return {def, brand, cat};
+  }
+
+  // Branch availability from SALES (Studio has no branch dimension).
+  // Filter by non-branch selections and collect the branches that remain.
+  function salesBranchAvail(){
+    const branch = new Set();
+    for(let i=0;i<STATE.sales.length;i++){
+      const r = STATE.sales[i];
+      if(f.defaults.size   && !f.defaults.has(r.defaultCategory)) continue;
+      if(f.brands.size     && !f.brands.has(r.brand))             continue;
+      if(f.categories.size && !f.categories.has(r.category))      continue;
+      if(r.branch) branch.add(r.branch);
+    }
+    return branch;
+  }
+
+  function apply(groupId, availableSet, selectedSet){
+    document.querySelectorAll('#'+groupId+' label').forEach(l=>{
+      const v = l.dataset.val;
+      const shouldShow = availableSet.has(v) || selectedSet.has(v);
+      l.classList.toggle('hidden-cascade', !shouldShow);
+      applyVisibility(l);
+    });
+  }
+
+  apply('f-branch',   salesBranchAvail(),      f.branches);
+  apply('f-default',  studioAvail('default').def,    f.defaults);
+  apply('f-brand',    studioAvail('brand').brand,    f.brands);
+  apply('f-category', studioAvail('category').cat,   f.categories);
+}
+
+/* ——— aggregations + charts ——— */
+function aggByMonth(rows){
+  const m = new Map();
+  rows.forEach(r=>{
+    const k = ymKey(r.date);
+    const o = m.get(k) || {rev:0, qty:0, projects:new Set()};
+    o.rev += r.amount; o.qty += r.qty; o.projects.add(r.projectNo);
+    m.set(k,o);
+  });
+  return [...m.entries()].sort(([a],[b])=>a.localeCompare(b))
+    .map(([k,v])=>({k, label:ymLabel(k), rev:v.rev, qty:v.qty, projects:v.projects.size}));
+}
+
+function chartDefaults(){
+  Chart.defaults.font.family = "'Inter', sans-serif";
+  Chart.defaults.color = PALETTE.muted;
+  Chart.defaults.borderColor = PALETTE.line;
+  // Animations are expensive on every refresh — disable for speed
+  Chart.defaults.animation = false;
+  Chart.defaults.transitions.active.animation.duration = 0;
+}
+chartDefaults();
+
+function drawMonthChart(sales){
+  const data = aggByMonth(sales);
+  const ctx = document.getElementById('chart-month').getContext('2d');
+  STATE.charts.month?.destroy();
+
+  const grad = ctx.createLinearGradient(0,0,0,280);
+  grad.addColorStop(0,'rgba(184,66,31,.25)');
+  grad.addColorStop(1,'rgba(184,66,31,0)');
+
+  STATE.charts.month = new Chart(ctx,{
+    type:'line',
+    data:{labels:data.map(d=>d.label),datasets:[{
+      data:data.map(d=>+(d.rev/1e7).toFixed(2)),
+      borderColor:PALETTE.accent, backgroundColor:grad,
+      borderWidth:2, tension:.35, fill:true,
+      pointRadius:4, pointBackgroundColor:PALETTE.accent, pointBorderColor:'#fff', pointBorderWidth:2,
+      pointHoverRadius:6,
+    }]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      onClick:(evt, elements)=>{
+        if(!elements.length) return;
+        const idx = elements[0].index;
+        setDateToMonth(data[idx].k);
+      },
+      onHover:(evt, els)=>{ evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          backgroundColor:PALETTE.ink, titleColor:'#fff', bodyColor:'#fff',
+          padding:10, borderColor:PALETTE.accent, borderWidth:1, displayColors:false,
+          callbacks:{label:c=>'₹ '+c.parsed.y.toFixed(2)+' Cr · click to filter'},
+        },
+      },
+      scales:{
+        x:{grid:{display:false},ticks:{font:{size:11}}},
+        y:{grid:{color:PALETTE.line,drawBorder:false},ticks:{callback:v=>'₹'+v+'Cr',font:{size:11}}},
+      },
+    },
+  });
+}
+
+function drawDefaultChart(sales){
+  const m = new Map();
+  sales.forEach(r=> m.set(r.defaultCategory, (m.get(r.defaultCategory)||0) + r.amount));
+  const data = [...m.entries()]
+    .map(([k,v])=>({k,label:DEFAULT_LABELS[k]||k,v}))
+    .sort((a,b)=>b.v-a.v);
+
+  const ctx = document.getElementById('chart-default').getContext('2d');
+  STATE.charts.def?.destroy();
+  STATE.charts.def = new Chart(ctx,{
+    type:'bar',
+    data:{labels:data.map(d=>d.label),datasets:[{
+      data:data.map(d=>+(d.v/1e7).toFixed(2)),
+      backgroundColor:[PALETTE.accent, PALETTE.blue, PALETTE.gold, PALETTE.green, PALETTE.muted, PALETTE.ink],
+      borderRadius:3, barThickness:'flex', maxBarThickness:60,
+    }]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      onClick:(evt, elements)=>{
+        if(!elements.length) return;
+        toggleFilter('default', data[elements[0].index].k);
+      },
+      onHover:(evt, els)=>{ evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          backgroundColor:PALETTE.ink, titleColor:'#fff', bodyColor:'#fff',
+          padding:10, displayColors:false,
+          callbacks:{label:c=>'₹ '+c.parsed.y.toFixed(2)+' Cr · click to filter'},
+        },
+      },
+      scales:{
+        x:{grid:{display:false},ticks:{font:{size:11}}},
+        y:{grid:{color:PALETTE.line},ticks:{callback:v=>'₹'+v+'Cr',font:{size:11}}},
+      },
+    },
+  });
+}
+
+function drawCategoryChart(sales){
+  // Aggregate REVENUE by category; skip unrecognized categories so junk doesn't dominate the chart.
+  const m = new Map();
+  for(let i=0;i<sales.length;i++){
+    const r = sales[i];
+    if(!r.categoryRecognized) continue;   // skip data-entry typos & legacy names
+    m.set(r.category, (m.get(r.category)||0) + r.amount);
+  }
+  const data = [...m.entries()].map(([k,v])=>({k,v}))
+    .sort((a,b)=>b.v-a.v).slice(0,12);
+
+  const ctx = document.getElementById('chart-category').getContext('2d');
+  STATE.charts.cat?.destroy();
+  STATE.charts.cat = new Chart(ctx,{
+    type:'bar',
+    data:{labels:data.map(d=>d.k),datasets:[{
+      data:data.map(d=>+(d.v/1e7).toFixed(2)),
+      backgroundColor:PALETTE.blue, borderRadius:3,
+      barThickness:'flex', maxBarThickness:22,
+    }]},
+    options:{
+      indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      onClick:(evt, elements)=>{
+        if(!elements.length) return;
+        toggleFilter('category', data[elements[0].index].k);
+      },
+      onHover:(evt, els)=>{ evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          backgroundColor:PALETTE.ink, titleColor:'#fff', bodyColor:'#fff',
+          padding:10, displayColors:false,
+          callbacks:{label:c=>'₹ '+c.parsed.x.toFixed(2)+' Cr · click to filter'},
+        },
+      },
+      scales:{
+        x:{grid:{color:PALETTE.line},ticks:{callback:v=>'₹'+v+'Cr',font:{size:11}}},
+        y:{grid:{display:false},ticks:{font:{size:11}}},
+      },
+    },
+  });
+}
+
+/* ——— tables ——— */
+function renderMonthTable(sales){
+  const data = aggByMonth(sales);
+  const tot = {rev:0, projects:new Set()};
+  sales.forEach(r=>{ tot.rev+=r.amount; tot.projects.add(r.projectNo); });
+
+  const tb = document.querySelector('#tbl-month tbody');
+  tb.innerHTML = data.map(d=>`
+    <tr>
+      <td>${d.label}</td>
+      <td class="num">${fmtN(d.projects)}</td>
+      <td class="num">${fmtINR(d.rev)}</td>
+    </tr>`).join('') + `
+    <tr class="total-row">
+      <td>Total</td>
+      <td class="num">${fmtN(tot.projects.size)}</td>
+      <td class="num">${fmtINR(tot.rev)}</td>
+    </tr>`;
+}
+
+function renderDeadTable(dead){
+  const rows = dead.slice(0,500);
+  const tb = document.querySelector('#tbl-dead tbody');
+  if(!rows.length){ tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">No dead stock under current filters</td></tr>'; return; }
+  tb.innerHTML = rows.map(r=>`
+    <tr>
+      <td>${escapeHtml(r.variantName||r.productName)}</td>
+      <td>${escapeHtml(r.category)}</td>
+      <td>${escapeHtml(r.brand)}</td>
+      <td><span class="badge ${BADGE_CLASS[r.backendType]||''}">${DEFAULT_LABELS[r.backendType]||r.backendType}</span></td>
+      <td class="mono" style="font-size:12px">${escapeHtml(r.erp)}</td>
+      <td>${r.onShopify ? '<span class="badge badge-shopify">Yes</span>' : '<span style="color:var(--muted)">—</span>'}</td>
+    </tr>`).join('');
+}
+
+function renderMovementTable(tblId, rows){
+  const top = rows.slice(0,500);
+  const tb = document.querySelector('#'+tblId+' tbody');
+  if(!top.length){ tb.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">No products under current filters</td></tr>'; return; }
+  const shopifySet = STATE._shopifyErpSet || new Set();
+  tb.innerHTML = top.map(r=>`
+    <tr>
+      <td>${escapeHtml(r.productName)}</td>
+      <td>${escapeHtml(r.category)}</td>
+      <td>${escapeHtml(r.brand)}</td>
+      <td class="mono" style="font-size:12px">${escapeHtml(r.erp)}</td>
+      <td class="num">${r.projects}</td>
+      <td class="num">${r.qty.toLocaleString('en-IN',{maximumFractionDigits:1})}</td>
+      <td class="num">${fmtINR(r.revenue)}</td>
+      <td>${shopifySet.has(r.erp) ? '<span class="badge badge-shopify">Yes</span>' : '<span style="color:var(--muted)">—</span>'}</td>
+    </tr>`).join('');
+    function renderDiscontinuedTable(rows){
+  const top = rows.slice(0,500);
+  const tb = document.querySelector('#tbl-discontinued tbody');
+
+  if(!top.length){
+    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">No discontinued products</td></tr>';
+    return;
+  }
+
+  tb.innerHTML = top.map(r=>`
+    <tr>
+      <td>${escapeHtml(r.productName)}</td>
+      <td>${escapeHtml(r.category)}</td>
+      <td>${escapeHtml(r.brand)}</td>
+      <td class="mono">${escapeHtml(r.erp)}</td>
+      <td class="num">${r.projects}</td>
+      <td class="num">₹ ${r.revenue.toLocaleString('en-IN')}</td>
+    </tr>
+  `).join('');
+}
+}
+
+/* ——— EC Inventory report ———
+   Builds a slow-moving-by-Expert-Centre report from sales data, scoped to
+   the chosen window (3M / 6M / 12M / all). Independent of the global
+   date filter — this report has its own time window controlled by the
+   preset buttons. */
+function computeECReport(sales, windowKey){
+  // Compute window cutoff
+  const now = STATE._dateMax || new Date();
+  let cutoff = null;
+  if(windowKey === '3m')  cutoff = new Date(now.getTime() - 90*24*3600*1000);
+  if(windowKey === '6m')  cutoff = new Date(now.getTime() - 182*24*3600*1000);
+  if(windowKey === '12m') cutoff = new Date(now.getTime() - 365*24*3600*1000);
+
+  // Single pass: aggregate per-ERP usage with per-branch project breakdown
+  const map = new Map();
+  for(let i=0;i<sales.length;i++){
+    const r = sales[i];
+    if(cutoff && r.date < cutoff) continue;
+    if(!r.erp) continue;
+    let m = map.get(r.erp);
+    if(!m){
+      m = {
+        erp: r.erp,
+        productName: r.productName || r.itemName,
+        category: r.category, brand: r.brand,
+        defaultCategory: r.defaultCategory,
+        revenue: 0,
+        lastUsed: null,
+        // Per-branch project sets (so we count *unique* projects, not rows)
+        branchProjects: new Map(),  // branchCode -> Set of projectNo
+        allProjects: new Set(),
+      };
+      map.set(r.erp, m);
+    }
+    m.revenue += r.amount;
+    if(!m.lastUsed || r.date > m.lastUsed) m.lastUsed = r.date;
+    m.allProjects.add(r.projectNo);
+    let bp = m.branchProjects.get(r.branch);
+    if(!bp){ bp = new Set(); m.branchProjects.set(r.branch, bp); }
+    bp.add(r.projectNo);
+  }
+
+  // Materialize rows with per-branch counts and recommendation
+  const rows = [];
+  map.forEach(m => {
+    const totalProj = m.allProjects.size;
+    if(totalProj > 5) return;   // only slow movers (≤5 projects in window)
+    const branches = {};
+    EC_ORDER.forEach(code => {
+      branches[code] = m.branchProjects.get(code)?.size || 0;
+    });
+    const daysSince = m.lastUsed ? Math.floor((now - m.lastUsed) / (24*3600*1000)) : null;
+    let rec, recClass;
+    if(totalProj === 0){
+      rec = 'Discontinue'; recClass = 'rec-discontinue';
+    } else if(totalProj <= 2){
+      rec = 'Review';      recClass = 'rec-review';
+    } else {
+      rec = 'Slow but active'; recClass = 'rec-active';
+    }
+    rows.push({
+      erp: m.erp, productName: m.productName,
+      category: m.category, brand: m.brand,
+      revenue: m.revenue, lastUsed: m.lastUsed, daysSince,
+      branches, totalProj, rec, recClass,
+    });
+  });
+
+  // Also include products with ZERO usage in the window IF they appeared
+  // outside the window — these are the most actionable inventory items.
+  if(cutoff){
+    const inWindowErps = new Set(rows.map(r=>r.erp));
+    const allTimeMap = new Map();
+    for(let i=0;i<sales.length;i++){
+      const r = sales[i];
+      if(!r.erp || inWindowErps.has(r.erp)) continue;
+      let m = allTimeMap.get(r.erp);
+      if(!m){
+        m = {
+          erp: r.erp,
+          productName: r.productName || r.itemName,
+          category: r.category, brand: r.brand,
+          revenue: 0, lastUsed: null,
+        };
+        allTimeMap.set(r.erp, m);
+      }
+      m.revenue += r.amount;
+      if(!m.lastUsed || r.date > m.lastUsed) m.lastUsed = r.date;
+    }
+    allTimeMap.forEach(m => {
+      const daysSince = m.lastUsed ? Math.floor((now - m.lastUsed) / (24*3600*1000)) : null;
+      const branches = {};
+      EC_ORDER.forEach(code => { branches[code] = 0; });
+      rows.push({
+        erp: m.erp, productName: m.productName,
+        category: m.category, brand: m.brand,
+        revenue: m.revenue, lastUsed: m.lastUsed, daysSince,
+        branches, totalProj: 0,
+        rec: 'Discontinue', recClass: 'rec-discontinue',
+      });
+    });
+  }
+
+  // Sort: zero-projects first (worst), then by total projects ASC, then by daysSince DESC
+  rows.sort((a,b) =>
+    a.totalProj - b.totalProj ||
+    (b.daysSince||0) - (a.daysSince||0) ||
+    a.revenue - b.revenue
+  );
+  return rows;
+}
+
+function renderECTable(rows){
+  const tb = document.querySelector('#tbl-ec tbody');
+  const top = rows.slice(0, 500);
+  if(!top.length){
+    tb.innerHTML = '<tr><td colspan="14" style="text-align:center;color:var(--muted);padding:24px">No slow movers in this window — try a wider preset</td></tr>';
+    return;
+  }
+  const shopifySet = STATE._shopifyErpSet || new Set();
+  const fmtDate = d => d ? d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}) : '—';
+  tb.innerHTML = top.map(r => `
+    <tr>
+      <td>${escapeHtml(r.productName)}</td>
+      <td>${escapeHtml(r.category)}</td>
+      <td>${escapeHtml(r.brand)}</td>
+      <td class="mono" style="font-size:11.5px">${escapeHtml(r.erp)}</td>
+      <td class="num ${r.branches['BNG - HSR']?'':'dim'}">${r.branches['BNG - HSR']||'—'}</td>
+      <td class="num ${r.branches['BNG - HRBR']?'':'dim'}">${r.branches['BNG - HRBR']||'—'}</td>
+      <td class="num ${r.branches['MUM - Thane']?'':'dim'}">${r.branches['MUM - Thane']||'—'}</td>
+      <td class="num ${r.branches['MUM - GOR']?'':'dim'}">${r.branches['MUM - GOR']||'—'}</td>
+      <td class="num ${r.branches['Mumbai-Dev']?'':'dim'}">${r.branches['Mumbai-Dev']||'—'}</td>
+      <td class="num">${r.totalProj}</td>
+      <td class="num">${fmtINR(r.revenue)}</td>
+      <td class="num" title="${r.daysSince!=null?r.daysSince+' days ago':''}">${fmtDate(r.lastUsed)}</td>
+      <td><span class="rec ${r.recClass}">${r.rec}</span></td>
+      <td>${shopifySet.has(r.erp) ? '<span class="badge badge-shopify">Yes</span>' : '<span style="color:var(--muted)">—</span>'}</td>
+    </tr>`).join('');
+}
+
+function ecWindowLabel(key){
+  return ({'3m':'last 3 months','6m':'last 6 months','12m':'last 12 months','all':'all time'})[key] || 'last 6 months';
+}
+
+/* ——— Brand Analysis report ———
+   Aggregates filtered Studio rows into Main → Sub-Category → Brand buckets,
+   showing dead/slow counts, average dead-SKU age, and ₹ values in Lakhs.
+   Respects the global studio filters (brand/category/branch/Shopify). */
+function computeBrandAnalysis(studio, sales){
+  // Build sets we need for dead/slow classification
+  const salesErps = new Set();
+  const salesBaseErps = new Set();
+  for(let i=0;i<sales.length;i++){
+    const r = sales[i];
+    if(r.erp){ salesErps.add(r.erp); if(r.baseErp) salesBaseErps.add(r.baseErp); }
+  }
+  // Slow movers: aggregate per-ERP project counts within the date range
+  const projectsByErp = new Map();
+  const revenueByErp = new Map();
+  for(let i=0;i<sales.length;i++){
+    const r = sales[i];
+    if(!r.erp) continue;
+    let p = projectsByErp.get(r.erp);
+    if(!p){ p = new Set(); projectsByErp.set(r.erp, p); }
+    p.add(r.projectNo);
+    revenueByErp.set(r.erp, (revenueByErp.get(r.erp)||0) + r.amount);
+  }
+  const slowErps = new Set();
+  projectsByErp.forEach((projs, erp) => {
+    if(projs.size >= 1 && projs.size <= 5) slowErps.add(erp);
+  });
+
+  // Aggregate by (main, sub, brand)
+  const now = new Date();   // age relative to today, not last sales date
+  const map = new Map();   // key = main|sub|brand
+  for(let i=0;i<studio.length;i++){
+    const s = studio[i];
+    if(!s.erp || s.isLogicVariant || !s.hasPrice) continue;
+    const sc = subCategoryOf(s);
+    if(!sc) continue;
+    const isDead = !salesErps.has(s.erp) && !salesBaseErps.has(s.baseErp);
+    const isSlow = slowErps.has(s.erp);
+    const brand = s.brand || '(no brand)';
+    const key = sc.main + '|' + sc.sub + '|' + brand;
+    let agg = map.get(key);
+    if(!agg){
+      agg = {
+        main: sc.main, sub: sc.sub, brand,
+        total: 0, dead: 0, deadValSum: 0,
+        deadAgeSum: 0, deadAgeCount: 0,
+        slow: 0, slowRevSum: 0,
+      };
+      map.set(key, agg);
+    }
+    agg.total++;
+    if(isDead){
+      agg.dead++;
+      agg.deadValSum += s.bestPrice || 0;
+      if(s.createdDate){
+        const ageMonths = (now - s.createdDate) / (1000*60*60*24*30.44);
+        agg.deadAgeSum += ageMonths;
+        agg.deadAgeCount++;
+      }
+    }
+    if(isSlow){
+      agg.slow++;
+      agg.slowRevSum += revenueByErp.get(s.erp) || 0;
+    }
+  }
+
+  // Materialize, sort
+  const rows = [];
+  map.forEach(a => {
+    rows.push({
+      main: a.main, sub: a.sub, brand: a.brand,
+      total: a.total, dead: a.dead,
+      deadPct: a.total ? a.dead/a.total : 0,
+      avgDeadAge: a.deadAgeCount ? Math.round(a.deadAgeSum/a.deadAgeCount) : null,
+      deadValLakh: a.deadValSum / 1e5,
+      slow: a.slow,
+      slowRevLakh: a.slowRevSum / 1e5,
+    });
+  });
+  // Sort: by Main (Modular, Neo Modular, Studio, Service order), then sub by total dead value desc, then brand by total desc
+  const MAIN_ORDER = {'Modular':0,'Neo Modular':1,'Studio':2,'Service':3};
+  // Compute per-sub dead value for ordering sub-cats
+  const subDeadVal = new Map();
+  rows.forEach(r => {
+    const k = r.main + '|' + r.sub;
+    subDeadVal.set(k, (subDeadVal.get(k)||0) + r.deadValLakh);
+  });
+  rows.sort((a,b) => {
+    const ma = MAIN_ORDER[a.main] ?? 99;
+    const mb = MAIN_ORDER[b.main] ?? 99;
+    if(ma !== mb) return ma - mb;
+    const sva = subDeadVal.get(a.main+'|'+a.sub) || 0;
+    const svb = subDeadVal.get(b.main+'|'+b.sub) || 0;
+    if(sva !== svb) return svb - sva;   // higher dead val first
+    return b.total - a.total;
+  });
+  return rows;
+}
+
+function renderBrandTable(rows){
+  const tb = document.querySelector('#tbl-brand tbody');
+  const tf = document.querySelector('#tbl-brand tfoot');
+  if(!rows.length){
+    tb.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">No brand data — try widening filters</td></tr>';
+    tf.innerHTML = '';
+    return;
+  }
+  // Track main/sub for visual grouping
+  let prevMain = null, prevSub = null;
+  const ageColor = m => m == null ? 'var(--muted)' : (m >= 24 ? 'var(--accent)' : (m >= 12 ? '#7a5e16' : 'var(--accent-2)'));
+  const mainColor = m => ({'Modular':'var(--accent)','Neo Modular':'#7a5e16','Studio':'var(--accent)','Service':'var(--accent-2)'}[m] || 'var(--ink)');
+
+  tb.innerHTML = rows.map(r => {
+    const showMain = r.main !== prevMain;
+    const showSub  = r.sub !== prevSub || showMain;
+    prevMain = r.main; prevSub = r.sub;
+    return `
+      <tr>
+        <td style="${showMain ? 'font-weight:600;color:'+mainColor(r.main) : 'color:var(--line)'}">${escapeHtml(r.main)}</td>
+        <td style="${showSub ? 'font-weight:500' : 'color:var(--line)'}">${escapeHtml(r.sub)}</td>
+        <td>${escapeHtml(r.brand)}</td>
+        <td class="num">${r.total}</td>
+        <td class="num" style="color:${r.dead>0?'var(--accent)':'var(--muted)'};font-weight:${r.dead>0?'600':'400'}">${r.dead}</td>
+        <td class="num" style="color:${r.dead>0?'var(--accent)':'var(--muted)'};font-weight:${r.dead>0?'600':'400'}">${(r.deadPct*100).toFixed(0)}%</td>
+        <td class="num" style="color:${ageColor(r.avgDeadAge)};font-weight:600">${r.avgDeadAge==null?'—':r.avgDeadAge}</td>
+        <td class="num" style="font-weight:600">${r.deadValLakh.toFixed(2)}</td>
+        <td class="num" style="color:${r.slow>0?'#7a5e16':'var(--muted)'}">${r.slow>0?r.slow:'—'}</td>
+        <td class="num" style="color:var(--accent-2)">${r.slowRevLakh>0?r.slowRevLakh.toFixed(2):'—'}</td>
+      </tr>
+    `;
+  }).join('');
+
+  // Grand total footer
+  const totals = rows.reduce((t,r)=>{
+    t.total += r.total; t.dead += r.dead; t.deadVal += r.deadValLakh;
+    t.slow += r.slow; t.slowRev += r.slowRevLakh;
+    if(r.avgDeadAge != null && r.dead > 0){ t.ageWeightedSum += r.avgDeadAge * r.dead; t.ageDead += r.dead; }
+    return t;
+  }, {total:0, dead:0, deadVal:0, slow:0, slowRev:0, ageWeightedSum:0, ageDead:0});
+  const totalPct = totals.total ? (totals.dead/totals.total*100).toFixed(0) : 0;
+  const avgAge = totals.ageDead ? Math.round(totals.ageWeightedSum/totals.ageDead) : null;
+  tf.innerHTML = `
+    <tr style="background:var(--paper-2);font-weight:600;border-top:2px solid var(--ink)">
+      <td colspan="3" style="padding:10px 8px">Grand Total</td>
+      <td class="num">${totals.total}</td>
+      <td class="num" style="color:var(--accent)">${totals.dead}</td>
+      <td class="num" style="color:var(--accent)">${totalPct}%</td>
+      <td class="num" style="color:${ageColor(avgAge)}">${avgAge==null?'—':avgAge}</td>
+      <td class="num">${totals.deadVal.toFixed(2)}</td>
+      <td class="num">${totals.slow}</td>
+      <td class="num" style="color:var(--accent-2)">${totals.slowRev.toFixed(2)}</td>
+    </tr>
+  `;
+}
+
+/* =========================================================
+   Inventory Analysis view — top-level toggle alternative to
+   the Sales Dashboard view. Computes KPIs and per-main +
+   per-brand rollups from already-filtered studio/sales.
+   ========================================================= */
+function renderInventoryView(studio, sales, brandRows){
+  // KPIs
+  const salesErps = new Set(); const salesBaseErps = new Set();
+  for(const r of sales){ if(r.erp){ salesErps.add(r.erp); if(r.baseErp) salesBaseErps.add(r.baseErp); }}
+  const projByErp = new Map(); const revByErp = new Map();
+  for(const r of sales){
+    if(!r.erp) continue;
+    let p = projByErp.get(r.erp); if(!p){ p=new Set(); projByErp.set(r.erp,p); }
+    p.add(r.projectNo);
+    revByErp.set(r.erp, (revByErp.get(r.erp)||0) + r.amount);
+  }
+  const slowErpsSet = new Set();
+  projByErp.forEach((s,e)=>{ if(s.size>=1 && s.size<=5) slowErpsSet.add(e); });
+
+  let deadCount=0, deadVal=0, oldDeadCount=0;
+  let slowCount=0, slowRev=0;
+  const now = new Date();  // age is relative to TODAY, not last sales date
+  for(const s of studio){
+    if(!s.erp || s.isLogicVariant || !s.hasPrice) continue;
+    // Note: do NOT gate on subCategoryOf — KPIs count ALL sellable SKUs.
+    // Sub-cat is only used for the per-Main/Sub/Brand drill-down tables below.
+    const isDead = !salesErps.has(s.erp) && !salesBaseErps.has(s.baseErp);
+    if(isDead){
+      deadCount++;
+      deadVal += s.bestPrice || 0;
+      if(s.createdDate){
+        const ageM = (now - s.createdDate) / (1000*60*60*24*30.44);
+        if(ageM >= 12) oldDeadCount++;
+      }
+    }
+    if(slowErpsSet.has(s.erp)){
+      slowCount++;
+      slowRev += revByErp.get(s.erp) || 0;
+    }
+  }
+  // Discontinued: sales ERPs not in studio
+  const studioErpSet = new Set(); for(const s of studio){ if(s.erp) studioErpSet.add(s.erp); }
+  let discRev = 0; const discErps = new Set();
+  for(const r of sales){
+    if(!r.erp) continue;
+    if(!studioErpSet.has(r.erp)){
+      discRev += r.amount;
+      discErps.add(r.erp);
+    }
+  }
+
+  // Fill KPI tiles
+  document.getElementById('ikpi-dead').textContent = fmtN(deadCount);
+  document.getElementById('ikpi-deadval').textContent = '₹' + (deadVal/1e7).toFixed(2) + ' Cr';
+  document.getElementById('ikpi-old').textContent = fmtN(oldDeadCount);
+  const oldPct = deadCount > 0 ? Math.round(oldDeadCount/deadCount*100) : 0;
+  document.getElementById('ikpi-old-sub').textContent = oldPct + '% of dead stock — true delist';
+  document.getElementById('ikpi-slow').textContent = fmtN(slowCount);
+  document.getElementById('ikpi-slowrev').textContent = '₹' + (slowRev/1e7).toFixed(2) + ' Cr';
+  document.getElementById('ikpi-disc').textContent = '₹' + (discRev/1e7).toFixed(2) + ' Cr';
+  document.getElementById('ikpi-disc-sub').textContent = fmtN(discErps.size) + ' legacy ERPs · already billed';
+
+  // === Per-Main Sourcing table ===
+  const MAIN_LIST = ['Studio','Neo Modular','Modular','Service'];
+  const mainAgg = {};
+  MAIN_LIST.forEach(m => mainAgg[m] = {dead:0, deadVal:0, slow:0, slowRev:0});
+  for(const r of brandRows){
+    const a = mainAgg[r.main]; if(!a) continue;
+    a.dead += r.dead;
+    a.deadVal += r.deadValLakh / 100; // L -> Cr
+    a.slow += r.slow;
+    a.slowRev += r.slowRevLakh / 100;
+  }
+  const priorityOf = m => m === 'Studio' ? 'HIGH' : (m === 'Neo Modular' ? 'MEDIUM' : 'LOW');
+  const priorityClass = p => p === 'HIGH' ? 'priority-high' : (p === 'MEDIUM' ? 'priority-med' : 'priority-low');
+
+  // Sort by total affected desc
+  const sortedMains = MAIN_LIST.slice().sort((a,b) => (mainAgg[b].dead+mainAgg[b].slow) - (mainAgg[a].dead+mainAgg[a].slow));
+
+  let totalDead=0, totalDeadVal=0, totalSlow=0, totalSlowRev=0;
+  const mainRowsHtml = sortedMains.map(m => {
+    const a = mainAgg[m];
+    const totalAffected = a.dead + a.slow;
+    totalDead += a.dead; totalDeadVal += a.deadVal; totalSlow += a.slow; totalSlowRev += a.slowRev;
+    const pr = priorityOf(m);
+    return `
+      <tr>
+        <td style="font-weight:600">${m}</td>
+        <td class="num" style="color:var(--accent);font-weight:600">${fmtN(a.dead)}</td>
+        <td class="num">₹${a.deadVal.toFixed(2)}</td>
+        <td class="num" style="color:#7a5e16">${fmtN(a.slow)}</td>
+        <td class="num" style="color:var(--accent-2)">₹${a.slowRev.toFixed(2)}</td>
+        <td class="num" style="font-weight:600">${fmtN(totalAffected)}</td>
+        <td class="ctr"><span class="priority-pill ${priorityClass(pr)}">${pr}</span></td>
+      </tr>`;
+  }).join('');
+
+  document.querySelector('#inv-main-table tbody').innerHTML = mainRowsHtml;
+  document.querySelector('#inv-main-table tfoot').innerHTML = `
+    <tr>
+      <td>Grand Total</td>
+      <td class="num">${fmtN(totalDead)}</td>
+      <td class="num">₹${totalDeadVal.toFixed(2)}</td>
+      <td class="num">${fmtN(totalSlow)}</td>
+      <td class="num">₹${totalSlowRev.toFixed(2)}</td>
+      <td class="num">${fmtN(totalDead+totalSlow)}</td>
+      <td class="ctr">—</td>
+    </tr>
+  `;
+
+  // === Brand drill-down ===
+  STATE._invBrandRows = brandRows;
+  populateInvSubFilter(brandRows);
+  renderInvBrandTable();
+}
+
+function populateInvSubFilter(rows){
+  const sel = document.getElementById('inv-filter-sub');
+  const mainSel = document.getElementById('inv-filter-main');
+  const mainVal = mainSel ? mainSel.value : 'ALL';
+  const subs = new Set();
+  for(const r of rows){
+    if(mainVal === 'ALL' || r.main === mainVal) subs.add(r.sub);
+  }
+  const current = sel.value;
+  const opts = ['<option value="ALL">All Sub-Groups</option>'];
+  [...subs].sort().forEach(s => opts.push(`<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`));
+  sel.innerHTML = opts.join('');
+  if([...subs].includes(current)) sel.value = current;
+}
+
+function renderInvBrandTable(){
+  const rows = STATE._invBrandRows || [];
+  const mainVal = document.getElementById('inv-filter-main').value;
+  const subVal  = document.getElementById('inv-filter-sub').value;
+  const ageVal  = document.getElementById('inv-filter-age').value;
+  const filtered = rows.filter(r => {
+    if(mainVal !== 'ALL' && r.main !== mainVal) return false;
+    if(subVal  !== 'ALL' && r.sub  !== subVal)  return false;
+    if(ageVal !== 'ALL'){
+      const a = r.avgDeadAge;
+      if(ageVal === 'CRITICAL' && !(a != null && a >= 24)) return false;
+      if(ageVal === 'WARNING'  && !(a != null && a >= 12 && a < 24)) return false;
+      if(ageVal === 'NEW'      && !(a != null && a < 12)) return false;
+    }
+    return true;
+  });
+
+  // Filter to "significant" brands so the table doesn't get noisy
+  const meaningful = filtered.filter(r => r.total >= 5 || r.deadValLakh >= 0.1 || r.slowRevLakh >= 0.5);
+
+  const tb = document.querySelector('#inv-brand-table tbody');
+  const tf = document.querySelector('#inv-brand-table tfoot');
+  const cards = document.getElementById('inv-brand-cards');
+
+  if(!meaningful.length){
+    tb.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">No brands match the current filters</td></tr>';
+    tf.innerHTML = '';
+    cards.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">No brands match the current filters</div>';
+    return;
+  }
+
+  // Group visual: hide repeating main / sub
+  let prevMain = null, prevSub = null;
+  const ageBadge = (a) => {
+    if(a == null) return '<span class="age-badge age-grey">—</span>';
+    if(a >= 24) return `<span class="age-badge age-red">${a}</span>`;
+    if(a >= 12) return `<span class="age-badge age-gold">${a}</span>`;
+    return `<span class="age-badge age-green">${a}</span>`;
+  };
+
+  tb.innerHTML = meaningful.map(r => {
+    const showMain = r.main !== prevMain;
+    const showSub  = r.sub !== prevSub || showMain;
+    prevMain = r.main; prevSub = r.sub;
+    // Always show main + sub text in dark ink. Use font-weight to distinguish first
+    // occurrence (bold) vs repeats (normal). No more washed-out grey.
+    return `
+      <tr>
+        <td style="color:var(--ink);font-weight:${showMain ? '600' : '400'}">${escapeHtml(r.main)}</td>
+        <td style="color:var(--ink);font-weight:${showSub ? '500' : '400'}">${escapeHtml(r.sub)}</td>
+        <td>${escapeHtml(r.brand)}</td>
+        <td class="num">${r.total}</td>
+        <td class="num" style="color:${r.dead>0?'var(--accent)':'var(--muted)'};font-weight:${r.dead>0?'600':'400'}">${r.dead}</td>
+        <td class="num" style="color:${r.dead>0?'var(--accent)':'var(--muted)'};font-weight:${r.dead>0?'600':'400'}">${(r.deadPct*100).toFixed(0)}%</td>
+        <td class="ctr">${ageBadge(r.avgDeadAge)}</td>
+        <td class="num" style="font-weight:600">${r.deadValLakh.toFixed(2)}</td>
+        <td class="num" style="color:${r.slow>0?'#7a5e16':'var(--muted)'}">${r.slow>0?r.slow:'—'}</td>
+        <td class="num" style="color:var(--accent-2)">${r.slowRevLakh>0?r.slowRevLakh.toFixed(2):'—'}</td>
+      </tr>
+    `;
+  }).join('');
+
+  // Footer totals
+  const t = meaningful.reduce((s,r)=>{
+    s.total += r.total; s.dead += r.dead; s.deadVal += r.deadValLakh;
+    s.slow += r.slow; s.slowRev += r.slowRevLakh;
+    if(r.avgDeadAge != null && r.dead > 0){ s.ageWS += r.avgDeadAge * r.dead; s.aD += r.dead; }
+    return s;
+  }, {total:0, dead:0, deadVal:0, slow:0, slowRev:0, ageWS:0, aD:0});
+  const tPct = t.total ? (t.dead/t.total*100).toFixed(0) : 0;
+  const tAge = t.aD ? Math.round(t.ageWS/t.aD) : null;
+  tf.innerHTML = `
+    <tr>
+      <td colspan="3">Grand Total (filtered)</td>
+      <td class="num">${t.total}</td>
+      <td class="num">${t.dead}</td>
+      <td class="num">${tPct}%</td>
+      <td class="ctr">${tAge==null?'—':tAge}</td>
+      <td class="num">${t.deadVal.toFixed(2)}</td>
+      <td class="num">${t.slow}</td>
+      <td class="num">${t.slowRev.toFixed(2)}</td>
+    </tr>
+  `;
+
+  // Mobile cards
+  let pm = null, ps = null;
+  const cardHtml = meaningful.map(r => {
+    const ageCls = r.avgDeadAge == null ? 'age-grey' : (r.avgDeadAge >= 24 ? 'age-red' : (r.avgDeadAge >= 12 ? 'age-gold' : 'age-green'));
+    return `
+      <div class="inv-brand-card">
+        <div class="bc-top">
+          <div>
+            <div class="bc-brand">${escapeHtml(r.brand)}</div>
+            <div class="bc-sub">${escapeHtml(r.main)} · ${escapeHtml(r.sub)}</div>
+          </div>
+          <span class="age-badge ${ageCls}" style="font-size:11px;padding:4px 9px">${r.avgDeadAge==null?'—':r.avgDeadAge+'m'}</span>
+        </div>
+        <div class="bc-stats">
+          <div class="bc-stat"><div class="bc-stat-label">Total</div><div class="bc-stat-val">${r.total}</div></div>
+          <div class="bc-stat"><div class="bc-stat-label">Dead</div><div class="bc-stat-val" style="color:var(--accent)">${r.dead}</div></div>
+          <div class="bc-stat"><div class="bc-stat-label">Dead %</div><div class="bc-stat-val" style="color:var(--accent)">${(r.deadPct*100).toFixed(0)}%</div></div>
+          <div class="bc-stat"><div class="bc-stat-label">Dead ₹L</div><div class="bc-stat-val">${r.deadValLakh.toFixed(2)}</div></div>
+          <div class="bc-stat"><div class="bc-stat-label">Slow</div><div class="bc-stat-val" style="color:#7a5e16">${r.slow>0?r.slow:'—'}</div></div>
+          <div class="bc-stat"><div class="bc-stat-label">Slow ₹L</div><div class="bc-stat-val" style="color:var(--accent-2)">${r.slowRevLakh>0?r.slowRevLakh.toFixed(2):'—'}</div></div>
+        </div>
+      </div>`;
+  }).join('');
+  // Mobile grand total at the end
+  const mobileTotal = `
+    <div class="inv-brand-mobile-total">
+      <div class="imt-label">Grand Total (filtered)</div>
+      <div class="imt-grid">
+        <div class="imt-cell">Total<strong>${t.total}</strong></div>
+        <div class="imt-cell">Dead<strong>${t.dead}</strong></div>
+        <div class="imt-cell">Dead %<strong>${tPct}%</strong></div>
+        <div class="imt-cell">Avg Age<strong>${tAge==null?'—':tAge+'m'}</strong></div>
+        <div class="imt-cell">Dead ₹L<strong>${t.deadVal.toFixed(2)}</strong></div>
+        <div class="imt-cell">Slow ₹L<strong>${t.slowRev.toFixed(2)}</strong></div>
+      </div>
+    </div>
+  `;
+  cards.innerHTML = cardHtml + mobileTotal;
+}
+
+
+function escapeHtml(s){
+  if(s==null) return '';
+  return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ——— CSV download ——— */
+function csvCell(v){
+  if(v==null) return '';
+  const s = String(v);
+  // Quote if contains comma, quote, newline, or starts with - (= formula in Excel)
+  if(/[",\n\r]/.test(s) || s.startsWith('=') || s.startsWith('-') || s.startsWith('+') || s.startsWith('@')){
+    return '"' + s.replace(/"/g,'""') + '"';
+  }
+  return s;
+}
+function toCsv(headers, rows){
+  const lines = [headers.map(csvCell).join(',')];
+  rows.forEach(r => lines.push(r.map(csvCell).join(',')));
+  // UTF-8 BOM so Excel opens with correct encoding for ₹ and non-ASCII chars
+  return '\uFEFF' + lines.join('\r\n');
+}
+function saveFile(filename, content){
+  const blob = new Blob([content], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
+}
+function todayStamp(){
+  const d = new Date();
+  return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
+}
+
+/* Inventory CSV — every SKU matching the global filters AND the 3 inventory
+   drill filters (Main / Sub-Sourcing / Age Risk). Used by the Download CSV
+   button under "By Sub-Sourcing & Brand · with Age". */
+function downloadInventoryCsv(){
+  // 1. Apply the same global filters that govern the dashboard
+  const studio = applyStudioFilters(STATE.studio);
+  const sales  = applySalesFilters(STATE.sales);
+
+  // 2. Build sales-ERP indexes for dead/slow classification (same logic as
+  //    computeBrandAnalysis so the export is consistent with what's on screen)
+  const salesErps = new Set();
+  const salesBaseErps = new Set();
+  const projByErp = new Map();
+  const revByErp  = new Map();
+  for(const r of sales){
+    if(!r.erp) continue;
+    salesErps.add(r.erp);
+    if(r.baseErp) salesBaseErps.add(r.baseErp);
+    let p = projByErp.get(r.erp); if(!p){ p = new Set(); projByErp.set(r.erp, p); }
+    p.add(r.projectNo);
+    revByErp.set(r.erp, (revByErp.get(r.erp)||0) + r.amount);
+  }
+  const slowErps = new Set();
+  projByErp.forEach((projs, erp) => { if(projs.size >= 1 && projs.size <= 5) slowErps.add(erp); });
+
+  // 3. Read the 3 inventory drill filters
+  const mainVal = document.getElementById('inv-filter-main').value;
+  const subVal  = document.getElementById('inv-filter-sub').value;
+  const ageVal  = document.getElementById('inv-filter-age').value;
+  const now = new Date();
+
+  // 4. For every sellable SKU: classify, filter, and build a row
+  const rows = [];
+  for(const s of studio){
+    if(!s.erp || s.isLogicVariant || !s.hasPrice) continue;
+    const sc = subCategoryOf(s);
+    if(!sc) continue;
+    // Apply inv drill filters: Main and Sub-Sourcing
+    if(mainVal !== 'ALL' && sc.main !== mainVal) continue;
+    if(subVal  !== 'ALL' && sc.sub  !== subVal)  continue;
+
+    // Status: Dead vs Slow vs Active
+    const isDead = !salesErps.has(s.erp) && !salesBaseErps.has(s.baseErp);
+    const isSlow = !isDead && slowErps.has(s.erp);
+    const status = isDead ? 'Dead' : (isSlow ? 'Slow' : 'Active');
+
+    // Age in months from createdDate
+    let ageMonths = '';
+    if(s.createdDate){
+      ageMonths = ((now - s.createdDate) / (1000*60*60*24*30.44)).toFixed(1);
+    }
+
+    // Apply Age Risk filter (only applies to dead SKUs — that's how the on-screen filter works)
+    if(ageVal !== 'ALL'){
+      const a = parseFloat(ageMonths);
+      const aValid = !isNaN(a);
+      if(ageVal === 'CRITICAL' && !(aValid && a >= 24)) continue;
+      if(ageVal === 'WARNING'  && !(aValid && a >= 12 && a < 24)) continue;
+      if(ageVal === 'NEW'      && !(aValid && a < 12)) continue;
+    }
+
+    // Days since first appearance in sales (lastUsed could be added, but keeping CSV lean)
+    const created = s.createdDate ? s.createdDate.toISOString().slice(0,10) : '';
+    const projects = projByErp.get(s.erp) ? projByErp.get(s.erp).size : 0;
+    const revenue  = revByErp.get(s.erp) || 0;
+
+    rows.push([
+      sc.main,                                  // Main
+      sc.sub,                                   // Sub-Sourcing
+      s.brand || '',                            // Brand
+      s.category || s.categoryRaw || '',        // Category (canonical)
+      s.productName || '',                      // Product Name
+      s.variantName || '',                      // Variant Name
+      s.erp,                                    // ERP Code
+      s.bngSp || '',                            // BNG SP
+      s.mumSp || '',                            // MUM SP
+      s.city || '',                             // Location / City
+      created,                                  // Created Date
+      ageMonths,                                // Age (months)
+      status,                                   // Status
+      projects,                                 // Projects (PKO count)
+      revenue ? revenue.toFixed(2) : '0',       // Revenue (₹)
+      s.onShopify ? 'Yes' : 'No',               // On Shopify
+    ]);
+  }
+
+  const headers = [
+    'Main','Sub-Sourcing','Brand','Category','Product Name','Variant Name','ERP Code',
+    'BNG SP (₹)','MUM SP (₹)','Location','Created Date','Age (months)',
+    'Status','Projects','Revenue (₹)','On Shopify',
+  ];
+  // Build filter-suffix for filename so it's obvious what's in the file
+  const parts = [];
+  if(mainVal !== 'ALL') parts.push(mainVal.replace(/\s+/g,'_'));
+  if(subVal  !== 'ALL') parts.push(subVal.replace(/\s+/g,'_').slice(0,20));
+  if(ageVal  !== 'ALL') parts.push(ageVal.toLowerCase());
+  const suffix = parts.length ? '_' + parts.join('_') : '_all';
+  saveFile(`inventory_by_brand${suffix}_${todayStamp()}.csv`, toCsv(headers, rows));
+  console.log(`[PKO Dashboard] Exported ${rows.length} SKUs to CSV`);
+}
+
+/* =========================================================
+   Project Composition view — per-PID product type mix
+   ========================================================= */
+
+/* Map a sales row's backendType (or, as fallback, the Studio dump's backendType
+   for that ERP) into one of the 4 canonical Main groups. Returns null if it
+   doesn't map cleanly so we can skip "Unknown" buckets. */
+const PC_BPT_MAP = {
+  'type_modular': 'Modular',
+  'type_neo_modular': 'Neo Modular',
+  'type_bonito_studio': 'Studio',
+  'type_service': 'Service',
+};
+
+/* For a sales row, resolve the Main group by:
+   1. Studio dump's backendType for this ERP (preferred — most accurate)
+   2. Sales row's own Default Category (backendType) as fallback */
+function pcResolveMain(row, studioMap){
+  // Try studio first (more reliable than the sales row's denormalized field)
+  const s = studioMap.get(row.erp);
+  if(s && s.backendType){
+    const m = PC_BPT_MAP[s.backendType];
+    if(m) return m;
+  }
+  // Fallback: sales row's Default Category
+  if(row.backendType){
+    const m = PC_BPT_MAP[row.backendType];
+    if(m) return m;
+  }
+  return null;  // unknown — won't be counted in the 4-way mix
+}
+
+/* Aggregate the filtered sales into per-PID summaries:
+   { projectNo, location, projectType, projectValue,
+     mod, neo, stu, svc (revenue ₹ per main group),
+     total (sum of those 4) }
+   Respects all global filters AND the projcomp filter bar. */
+function pcAggregate(){
+  // Apply global filters
+  let sales = applySalesFilters(STATE.sales);
+
+  // Apply projcomp filters
+  const locVal  = document.getElementById('pc-filter-location').value;
+  const typeVal = document.getElementById('pc-filter-type').value;
+  const catVal  = document.getElementById('pc-filter-cat').value;
+  const fromVal = document.getElementById('pc-filter-from').value;
+  const toVal   = document.getElementById('pc-filter-to').value;
+
+  if(locVal !== 'ALL')  sales = sales.filter(r => r.branch === locVal);
+  if(typeVal !== 'ALL') sales = sales.filter(r => r.projectType === typeVal);
+  if(fromVal){
+    const f = new Date(fromVal);
+    sales = sales.filter(r => r.date >= f);
+  }
+  if(toVal){
+    const t = new Date(toVal); t.setHours(23,59,59,999);
+    sales = sales.filter(r => r.date <= t);
+  }
+
+  // Build studio lookup map for category resolution
+  const studioMap = new Map();
+  for(const s of STATE.studio){
+    if(s.erp && !studioMap.has(s.erp)) studioMap.set(s.erp, s);
+  }
+
+  // Group by Project No
+  //
+  // Two separate per-PKO tallies are maintained:
+  //
+  // 1. CATEGORY MIX (mod/neo/stu/svc + total) — counts of LINE ITEMS.
+  //    Per Neelam's framing: "what % of the products used in this PKO were
+  //    Modular vs Studio vs Service?" — line-item count, not revenue.
+  //
+  // 2. REVENUE (revMod / revNeo / revStu / revSvc / revTotal) — sum of Amount.
+  //    Used by the location KPIs and revenue context in tooltips. Not used in
+  //    the % math.
+  const byProject = new Map();
+  for(const r of sales){
+    if(!r.projectNo) continue;
+    let p = byProject.get(r.projectNo);
+    if(!p){
+      p = {
+        projectNo: r.projectNo,
+        location: r.branch,
+        projectType: r.projectType,
+        projectValue: r.projectValue,   // same on every row of the PKO
+        // category mix — by LINE-ITEM COUNT
+        mod: 0, neo: 0, stu: 0, svc: 0, total: 0,
+        // category revenue — kept for KPIs and CSV context
+        revMod: 0, revNeo: 0, revStu: 0, revSvc: 0, revTotal: 0,
+      };
+      byProject.set(r.projectNo, p);
+    }
+    // Take max projectValue (in case rows differ slightly)
+    if(r.projectValue > p.projectValue) p.projectValue = r.projectValue;
+    // Resolve main group; skip row if it can't be resolved
+    const main = pcResolveMain(r, studioMap);
+    if(!main) continue;
+    const amt = r.amount || 0;
+    if(main === 'Modular')     { p.mod++; p.revMod += amt; }
+    else if(main === 'Neo Modular') { p.neo++; p.revNeo += amt; }
+    else if(main === 'Studio') { p.stu++; p.revStu += amt; }
+    else if(main === 'Service') { p.svc++; p.revSvc += amt; }
+    p.total++;
+    p.revTotal += amt;
+  }
+
+  let projects = [...byProject.values()];
+
+  // Apply Category filter — only keep projects where THIS group has at least 5% share
+  if(catVal !== 'ALL'){
+    projects = projects.filter(p => {
+      const cat = catVal === 'Modular' ? p.mod
+                : catVal === 'Neo Modular' ? p.neo
+                : catVal === 'Studio' ? p.stu
+                : catVal === 'Service' ? p.svc : 0;
+      return p.total > 0 && (cat / p.total) >= 0.05;
+    });
+  }
+
+  return projects;
+}
+
+function renderProjectComposition(){
+  // Populate filter dropdowns first (only once, or when data changes)
+  pcPopulateFilters();
+
+  const projects = pcAggregate();
+  STATE._pcProjects = projects;
+  pcRenderKPIs(projects);
+  pcRenderHeadlineBar(projects);
+  pcRenderBreakdowns(projects);
+  pcRenderTable(projects);
+}
+
+function pcPopulateFilters(){
+  if(STATE._pcFiltersPopulated) return;
+  // Location options from sales branches
+  const locs = [...new Set(STATE.sales.map(r => r.branch).filter(Boolean))].sort();
+  const locSel = document.getElementById('pc-filter-location');
+  for(const l of locs){
+    const opt = document.createElement('option');
+    opt.value = l; opt.textContent = l;
+    locSel.appendChild(opt);
+  }
+  // Project Type options
+  const types = [...new Set(STATE.sales.map(r => r.projectType).filter(Boolean))].sort();
+  const typeSel = document.getElementById('pc-filter-type');
+  for(const t of types){
+    const opt = document.createElement('option');
+    opt.value = t; opt.textContent = t;
+    typeSel.appendChild(opt);
+  }
+  // Date defaults from data range
+  if(STATE._dateMin && STATE._dateMax){
+    const toISO = d => d.toISOString().slice(0,10);
+    const df = document.getElementById('pc-filter-from');
+    const dt = document.getElementById('pc-filter-to');
+    df.min = dt.min = toISO(STATE._dateMin);
+    df.max = dt.max = toISO(STATE._dateMax);
+    df.value = toISO(STATE._dateMin);
+    dt.value = toISO(STATE._dateMax);
+  }
+  STATE._pcFiltersPopulated = true;
+}
+
+function pcRenderKPIs(projects){
+  const count = projects.length;
+  // Avg Project Value — only over PKOs that have a real Project Value (>0),
+  // because some legacy PKOs will have blank Project Value entries.
+  const withVal = projects.filter(p => p.projectValue > 0);
+  const totalVal = withVal.reduce((s,p) => s + p.projectValue, 0);
+  const avgVal = withVal.length > 0 ? totalVal / withVal.length : 0;
+  document.getElementById('pc-kpi-avgval').textContent =
+    avgVal > 0 ? (avgVal/1e5).toFixed(2) + ' L' : '—';
+
+  // Location KPIs: count PKOs and sum Amount per location.
+  // Branch labels in the sales data are full names like "BNG - HSR", "MUM - GOR" (Andheri),
+  // "MUM - Thane", "BNG - HRBR", "Mumbai-Dev". Map to short labels for the tiles.
+  const LOC_MATCHERS = [
+    { key:'hsr',     test: b => /HSR/i.test(b) },
+    { key:'hrbr',    test: b => /HRBR/i.test(b) },
+    { key:'andheri', test: b => /GOR/i.test(b) || /Andheri/i.test(b) },
+    { key:'thane',   test: b => /Thane/i.test(b) },
+  ];
+  const locStats = {hsr:{n:0,rev:0}, hrbr:{n:0,rev:0}, andheri:{n:0,rev:0}, thane:{n:0,rev:0}};
+  for(const p of projects){
+    const branch = p.location || '';
+    for(const m of LOC_MATCHERS){
+      if(m.test(branch)){
+        locStats[m.key].n++;
+        locStats[m.key].rev += (p.revTotal || 0);
+        break;
+      }
+    }
+  }
+  const fmtRev = v => v > 0 ? '₹' + (v/1e7).toFixed(2) + ' Cr' : '—';
+  const fmtN_ = n => n > 0 ? n.toLocaleString('en-IN') + ' PKOs' : '0 PKOs';
+  ['hsr','hrbr','andheri','thane'].forEach(k => {
+    document.getElementById('pc-loc-' + k).textContent = fmtRev(locStats[k].rev);
+    document.getElementById('pc-loc-' + k + '-sub').textContent = fmtN_(locStats[k].n);
+  });
+}
+
+function pcRenderHeadlineBar(projects){
+  const tot = projects.reduce((s,p) => ({
+    mod: s.mod + p.mod, neo: s.neo + p.neo, stu: s.stu + p.stu, svc: s.svc + p.svc,
+  }), {mod:0,neo:0,stu:0,svc:0});
+  const grand = tot.mod + tot.neo + tot.stu + tot.svc;
+  const bar = document.getElementById('pc-stack-bar');
+  if(grand <= 0){
+    bar.innerHTML = '<div style="padding:10px 16px;color:var(--muted);font-size:12px">No data in current selection</div>';
+    document.getElementById('pc-mix-legend').innerHTML = '';
+    document.getElementById('pc-bar-sub').textContent = 'no PKOs match the filters';
+    return;
+  }
+  const pct = v => (v/grand*100);
+  const seg = (cls, val) => {
+    const p = pct(val);
+    if(p < 0.5) return '';
+    return `<div class="pc-stack-seg ${cls}" style="flex:${p.toFixed(2)}">${({
+      mod:'Modular',neo:'Neo',stu:'Studio',svc:'Service'
+    })[cls]} ${p.toFixed(0)}%</div>`;
+  };
+  bar.innerHTML = seg('mod', tot.mod) + seg('neo', tot.neo) + seg('stu', tot.stu) + seg('svc', tot.svc);
+
+  const fmt = v => v.toLocaleString('en-IN') + ' items';
+  document.getElementById('pc-mix-legend').innerHTML = `
+    <span><i style="background:var(--accent)"></i> Modular <span class="v">${fmt(tot.mod)}</span></span>
+    <span><i style="background:#7a5e16"></i> Neo Modular <span class="v">${fmt(tot.neo)}</span></span>
+    <span><i style="background:var(--accent-2)"></i> Studio <span class="v">${fmt(tot.stu)}</span></span>
+    <span><i style="background:#3b6086"></i> Service <span class="v">${fmt(tot.svc)}</span></span>
+  `;
+  document.getElementById('pc-bar-sub').textContent = `based on line-item count across ${projects.length.toLocaleString('en-IN')} PKOs`;
+}
+
+function pcRenderBreakdowns(projects){
+  const renderGroup = (containerId, keyFn) => {
+    const groups = new Map();
+    for(const p of projects){
+      const k = keyFn(p) || '(blank)';
+      let g = groups.get(k);
+      if(!g){ g = {mod:0,neo:0,stu:0,svc:0,total:0,rev:0}; groups.set(k,g); }
+      g.mod += p.mod; g.neo += p.neo; g.stu += p.stu; g.svc += p.svc; g.total += p.total;
+      g.rev += p.revTotal || 0;
+    }
+    const rows = [...groups.entries()].sort((a,b) => b[1].total - a[1].total).slice(0,8);
+    const el = document.getElementById(containerId);
+    if(rows.length === 0){
+      el.innerHTML = '<div style="color:var(--muted);font-size:11.5px;padding:8px 0">No data</div>';
+      return;
+    }
+    el.innerHTML = rows.map(([k, g]) => {
+      const total = g.total || 1;
+      const w = v => (v/total*100).toFixed(2) + '%';
+      // Right-side total shows ITEM count (consistent with the bar). Revenue
+      // shown in the tooltip so a curious user can hover for ₹ context.
+      const itemLabel = g.total.toLocaleString('en-IN') + ' items';
+      const revLabel  = g.rev > 0 ? '₹' + (g.rev/1e7).toFixed(2) + ' Cr' : '';
+      return `
+        <div class="pc-bd-row" title="${escapeHtml(k)} — ${itemLabel}${revLabel?' · '+revLabel:''}">
+          <span class="lbl" title="${escapeHtml(k)}">${escapeHtml(k)}</span>
+          <div class="bar">
+            <div style="background:var(--accent);width:${w(g.mod)}"></div>
+            <div style="background:#7a5e16;width:${w(g.neo)}"></div>
+            <div style="background:var(--accent-2);width:${w(g.stu)}"></div>
+            <div style="background:#3b6086;width:${w(g.svc)}"></div>
+          </div>
+          <span class="total">${itemLabel}</span>
+        </div>
+      `;
+    }).join('');
+  };
+  renderGroup('pc-byloc-rows',  p => p.location);
+  renderGroup('pc-bytype-rows', p => p.projectType);
+}
+
+function pcRenderTable(projects){
+  // Sort by project value desc
+  let display = [...projects].sort((a,b) => (b.projectValue || 0) - (a.projectValue || 0));
+  // Apply search filter
+  const q = (document.getElementById('pc-search')?.value || '').trim().toLowerCase();
+  if(q){
+    display = display.filter(p => String(p.projectNo).toLowerCase().includes(q));
+  }
+  // Limit rendered rows for performance — show top 500
+  const SHOW_LIMIT = 500;
+  const shown = display.slice(0, SHOW_LIMIT);
+
+  document.getElementById('pc-detail-sub').textContent =
+    `${display.length.toLocaleString('en-IN')} PKO${display.length===1?'':'s'} · showing top ${shown.length.toLocaleString('en-IN')} by Project Value · each row shows that PID's product split by revenue`;
+
+  const tb = document.getElementById('pc-tbody');
+  if(shown.length === 0){
+    tb.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">No PKOs match the filters</td></tr>';
+    document.getElementById('pc-tfoot').innerHTML = '';
+    return;
+  }
+
+  tb.innerHTML = shown.map(p => {
+    const total = p.total || 1;
+    const pct = v => (v/total*100);
+    const fmtPct = (cls, v) => {
+      const x = pct(v);
+      if(x < 0.5) return `<span class="pc-pct zero">0%</span>`;
+      return `<span class="pc-pct ${cls}">${x.toFixed(0)}%</span>`;
+    };
+    const w = v => (v/total*100).toFixed(2) + '%';
+    // PID — handle blank/zero values
+    const pidLabel = p.projectNo ? String(p.projectNo) : '(no PID)';
+    const locChip = p.location ? `<span class="pc-chip pc-chip-loc">${escapeHtml(p.location)}</span>` : '—';
+    const typeChip = p.projectType ? `<span class="pc-chip pc-chip-typ">${escapeHtml(p.projectType)}</span>` : '—';
+    const pVal = p.projectValue > 0 ? '₹' + p.projectValue.toLocaleString('en-IN') : '—';
+    return `
+      <tr>
+        <td><span class="pc-pid">${escapeHtml(pidLabel)}</span></td>
+        <td>${locChip}</td>
+        <td>${typeChip}</td>
+        <td class="num pc-pval">${pVal}</td>
+        <td>
+          <div class="pc-mini-stack">
+            <div style="background:var(--accent);width:${w(p.mod)}"></div>
+            <div style="background:#7a5e16;width:${w(p.neo)}"></div>
+            <div style="background:var(--accent-2);width:${w(p.stu)}"></div>
+            <div style="background:#3b6086;width:${w(p.svc)}"></div>
+          </div>
+        </td>
+        <td class="num">${fmtPct('mod', p.mod)}</td>
+        <td class="num">${fmtPct('neo', p.neo)}</td>
+        <td class="num">${fmtPct('stu', p.stu)}</td>
+        <td class="num">${fmtPct('svc', p.svc)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  // Grand total footer reflects ALL filtered projects (not just shown)
+  const t = display.reduce((s,p) => ({
+    mod: s.mod+p.mod, neo: s.neo+p.neo, stu: s.stu+p.stu, svc: s.svc+p.svc,
+    pval: s.pval + (p.projectValue || 0),
+  }), {mod:0,neo:0,stu:0,svc:0,pval:0});
+  const grand = t.mod + t.neo + t.stu + t.svc;
+  const pctG = v => grand > 0 ? (v/grand*100).toFixed(0)+'%' : '—';
+  document.getElementById('pc-tfoot').innerHTML = `
+    <tr class="pc-tfoot">
+      <td colspan="3">Grand Total · ${display.length.toLocaleString('en-IN')} PKOs</td>
+      <td class="num pc-pval">₹${t.pval.toLocaleString('en-IN')}</td>
+      <td>
+        <div class="pc-mini-stack" style="width:120px">
+          <div style="background:var(--accent);width:${grand>0?(t.mod/grand*100).toFixed(2):0}%"></div>
+          <div style="background:#7a5e16;width:${grand>0?(t.neo/grand*100).toFixed(2):0}%"></div>
+          <div style="background:var(--accent-2);width:${grand>0?(t.stu/grand*100).toFixed(2):0}%"></div>
+          <div style="background:#3b6086;width:${grand>0?(t.svc/grand*100).toFixed(2):0}%"></div>
+        </div>
+      </td>
+      <td class="num"><span class="pc-pct mod">${pctG(t.mod)}</span></td>
+      <td class="num"><span class="pc-pct neo">${pctG(t.neo)}</span></td>
+      <td class="num"><span class="pc-pct stu">${pctG(t.stu)}</span></td>
+      <td class="num"><span class="pc-pct svc">${pctG(t.svc)}</span></td>
+    </tr>
+  `;
+}
+
+function pcResetFilters(){
+  document.getElementById('pc-filter-location').value = 'ALL';
+  document.getElementById('pc-filter-type').value = 'ALL';
+  document.getElementById('pc-filter-cat').value = 'ALL';
+  if(STATE._dateMin && STATE._dateMax){
+    const toISO = d => d.toISOString().slice(0,10);
+    document.getElementById('pc-filter-from').value = toISO(STATE._dateMin);
+    document.getElementById('pc-filter-to').value = toISO(STATE._dateMax);
+  }
+  document.querySelectorAll('.pc-presets button').forEach(b => b.classList.toggle('active', b.dataset.pcPreset === 'all'));
+  document.getElementById('pc-search').value = '';
+  renderProjectComposition();
+}
+
+function pcDownloadCsv(){
+  const projects = STATE._pcProjects || [];
+  const headers = [
+    'PID','Location','Project Type',
+    'Project Value (₹)','Total Items','Total Revenue (₹)',
+    'Modular Items','Modular %','Modular Revenue (₹)',
+    'Neo Modular Items','Neo Modular %','Neo Modular Revenue (₹)',
+    'Studio Items','Studio %','Studio Revenue (₹)',
+    'Service Items','Service %','Service Revenue (₹)',
+  ];
+  const rows = projects.map(p => {
+    const total = p.total || 1;
+    const pct = v => total > 0 ? (v/total*100).toFixed(1) : '0';
+    return [
+      p.projectNo || '', p.location || '', p.projectType || '',
+      p.projectValue || 0, p.total, Math.round(p.revTotal || 0),
+      p.mod, pct(p.mod) + '%', Math.round(p.revMod || 0),
+      p.neo, pct(p.neo) + '%', Math.round(p.revNeo || 0),
+      p.stu, pct(p.stu) + '%', Math.round(p.revStu || 0),
+      p.svc, pct(p.svc) + '%', Math.round(p.revSvc || 0),
+    ];
+  });
+  saveFile(`project_composition_${todayStamp()}.csv`, toCsv(headers, rows));
+}
+function downloadCsv(which){
+  const stamp = todayStamp();
+  const shopifySet = STATE._shopifyErpSet || new Set();
+  if(which==='dead'){
+    const rows = STATE.lastDead.map(r=>[
+      r.variantName||r.productName, r.productName, r.category, r.brand,
+      DEFAULT_LABELS[r.backendType]||r.backendType, r.erp, r.city||'',
+      r.onShopify ? 'Yes' : '',
+    ]);
+    const csv = toCsv(
+      ['Variant Name','Product Name','Category','Brand','Backend Type','ERP Code','City','On Shopify'],
+      rows
+    );
+    saveFile(`dead_stock_${stamp}.csv`, csv);
+  } else if(which==='fast' || which==='slow'){
+    const src = which==='fast' ? STATE.lastFast : STATE.lastSlow;
+    const rows = src.map(r=>[
+      r.productName, r.category, r.brand, r.erp,
+      DEFAULT_LABELS[r.defaultCategory]||r.defaultCategory,
+      r.projects, r.qty.toFixed(2), r.revenue.toFixed(2),
+      shopifySet.has(r.erp) ? 'Yes' : '',
+    ]);
+    const csv = toCsv(
+      ['Product Name','Category','Brand','ERP Code','Backend Type','Projects','Qty','Revenue (INR)','On Shopify'],
+      rows
+    );
+    saveFile(`${which}_moving_${stamp}.csv`, csv);
+  } else if(which==='discontinued'){
+  const rows = STATE.lastDiscontinued.map(r=>[
+    r.productName,
+    r.category,
+    r.brand,
+    r.erp,
+    r.projects,
+    r.revenue
+  ]);
+
+  const csv = toCsv(
+    ['Product Name','Category','Brand','ERP Code','Projects','Revenue'],
+    rows
+  );
+
+  saveFile(`discontinued_${todayStamp()}.csv`, csv);
+} else if(which==='ec'){
+  const fmtDate = d => d ? d.toISOString().slice(0,10) : '';
+  const rows = STATE.lastEC.map(r => [
+    r.productName, r.category, r.brand, r.erp,
+    r.branches['BNG - HSR']||0,
+    r.branches['BNG - HRBR']||0,
+    r.branches['MUM - Thane']||0,
+    r.branches['MUM - GOR']||0,
+    r.branches['Mumbai-Dev']||0,
+    r.totalProj, r.revenue.toFixed(2),
+    fmtDate(r.lastUsed),
+    r.daysSince!=null ? r.daysSince : '',
+    r.rec,
+    (STATE._shopifyErpSet && STATE._shopifyErpSet.has(r.erp)) ? 'Yes' : '',
+  ]);
+  const csv = toCsv(
+    ['Product Name','Category','Brand','ERP Code',
+     'HSR (projects)','HRBR (projects)','Thane (projects)','Andheri (projects)','Mumbai-Dev (projects)',
+     'Total Projects','Revenue (INR)','Last Used','Days Since','Recommendation','On Shopify'],
+    rows
+  );
+  saveFile(`slow_moving_ec_report_${todayStamp()}_${STATE.ecWindow}.csv`, csv);
+}
+}
+
+/* go */
+init();
+</script>
+</body>
+</html>
