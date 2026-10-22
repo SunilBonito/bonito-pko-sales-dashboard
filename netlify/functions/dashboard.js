@@ -82,7 +82,8 @@ function getCached(key){
 }
 function setCached(key, data){ cache.set(key, { ts: Date.now(), data }); }
 
-const PAGE_SIZE = 40000;
+const SALES_PAGE_SIZE = 40000;
+const STUDIO_PAGE_SIZE = 15000;  // Studio rows are fatter (name, variant, brand, category strings) so pages must be smaller to fit Lambda's 6MB response cap.
 
 /* --- Query 1: Sales line items — PAGINATED and FIXED ---
    Key fixes vs previous version:
@@ -92,7 +93,7 @@ const PAGE_SIZE = 40000;
     b) Normalize ERP code to upperUTF8(trim(...)) so Map lookups on the
        frontend match the studio catalog's ERP spelling. */
 function buildSalesQuery(page){
-  const offset = page * PAGE_SIZE;
+  const offset = page * SALES_PAGE_SIZE;
   return `
 WITH
 quotes_dedup AS (
@@ -140,7 +141,7 @@ INNER JOIN projects_dedup lp ON lp.id = qd.quotable_id
 INNER JOIN variants_dedup v ON v.id = li.product_variant_id
 GROUP BY lp.project_no, upperUTF8(trim(v.erp_code))
 ORDER BY lp.project_no, upperUTF8(trim(v.erp_code))
-LIMIT ${PAGE_SIZE} OFFSET ${offset}
+LIMIT ${SALES_PAGE_SIZE} OFFSET ${offset}
 `;
 }
 
@@ -154,7 +155,7 @@ LIMIT ${PAGE_SIZE} OFFSET ${offset}
        type_service for the dashboard's existing logic.
     c) Normalize ERP to upperUTF8(trim) to match sales. */
 function buildStudioQuery(page){
-  const offset = page * PAGE_SIZE;
+  const offset = page * STUDIO_PAGE_SIZE;
   return `
 WITH
 cats_dedup AS (
@@ -224,7 +225,6 @@ SELECT
   COALESCE(v.variant_name, '') AS variant_name,
   COALESCE(b.brand_name, '') AS brand,
   COALESCE(cr.leaf_name, '') AS category,
-  COALESCE(cr.root_name, '') AS main_category,
   CASE lower(COALESCE(cr.root_name, ''))
     WHEN 'modular' THEN 'type_modular'
     WHEN 'neo modular' THEN 'type_neo_modular'
@@ -234,8 +234,6 @@ SELECT
     WHEN 'service' THEN 'type_service'
     ELSE 'type_other'
   END AS default_category,
-  p.backend_product_type AS backend_product_type,
-  p.bom_type AS bom_type,
   toString(p.created_at) AS created_date,
   p.status AS status,
   COALESCE(bng.bng_sp, 0) AS bng_sp,
@@ -247,7 +245,7 @@ LEFT JOIN cat_roots cr ON cr.cat_id = p.product_category_id
 LEFT JOIN bng_prices bng ON bng.variant_id = v.id
 LEFT JOIN mum_prices mum ON mum.variant_id = v.id
 ORDER BY upperUTF8(trim(v.erp_code))
-LIMIT ${PAGE_SIZE} OFFSET ${offset}
+LIMIT ${STUDIO_PAGE_SIZE} OFFSET ${offset}
 `;
 }
 
