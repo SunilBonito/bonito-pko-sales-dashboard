@@ -5,12 +5,10 @@ const https = require('https');
 const zlib = require('zlib');
 const { Pool, types } = require('pg');
 
-// Make Postgres return decimals as numbers, not strings. 1700 = DECIMAL/NUMERIC.
 types.setTypeParser(1700, v => v === null ? null : parseFloat(v));
 types.setTypeParser(701,  v => v === null ? null : parseFloat(v));
 types.setTypeParser(23,   v => v === null ? null : parseInt(v, 10));
 
-/* ----------------------------- Postgres pool ---------------------------- */
 let pgPool = null;
 function getPgPool(){
   if(pgPool) return pgPool;
@@ -28,7 +26,6 @@ function getPgPool(){
   return pgPool;
 }
 
-/* --------------------------- ClickHouse call ---------------------------- */
 function clickhouseQuery(sql){
   return new Promise((resolve, reject) => {
     const auth = Buffer.from(`${process.env.CH_USER}:${process.env.CH_PASS}`).toString('base64');
@@ -53,17 +50,16 @@ function clickhouseQuery(sql){
       stream.on('data', chunk => { chunks.push(chunk); });
       stream.on('end', () => {
         const data = Buffer.concat(chunks).toString('utf8');
-        chunks.length = 0; // free early
+        chunks.length = 0;
         if(res.statusCode >= 400){
           return reject(new Error(`ClickHouse ${res.statusCode}: ${data.slice(0, 500)}`));
         }
-        // Parse line by line, pushing into array — don't hold the big string + array both
         const lines = data.split('\n');
         const rows = [];
         for(let i = 0; i < lines.length; i++){
           const l = lines[i];
           if(l) rows.push(JSON.parse(l));
-          lines[i] = null;  // let GC reclaim parsed lines
+          lines[i] = null;
         }
         resolve(rows);
       });
@@ -76,7 +72,6 @@ function clickhouseQuery(sql){
   });
 }
 
-/* ----------------------------- Query cache ------------------------------ */
 const CACHE_TTL_MS = 60 * 1000;
 const cache = new Map();
 function getCached(key){
@@ -87,22 +82,21 @@ function getCached(key){
 }
 function setCached(key, data){ cache.set(key, { ts: Date.now(), data }); }
 
-/* ============================================================
-   QUERIES
-   ============================================================ */
+const PAGE_SIZE = 40000;
 
-/* --- Query 1: SLIM sales line items aggregated by (project_no, erp_code).
-   PAGINATED — each call returns at most PAGE_SIZE rows ordered by
-   (project_no, erp_code), skipping (page * PAGE_SIZE). Frontend calls
-   repeatedly until it gets back fewer than PAGE_SIZE rows. */
-const PAGE_SIZE = 40000;  // ~4 MB per page, under Lambda's 6 MB cap
-
+/* --- Query 1: Sales line items — PAGINATED and FIXED ---
+   Key fixes vs previous version:
+    a) Added `current = true` filter on quotes (each project had 2-20+
+       versions of its quote, all with line items — this was the 15-20x
+       revenue inflation).
+    b) Normalize ERP code to upperUTF8(trim(...)) so Map lookups on the
+       frontend match the studio catalog's ERP spelling. */
 function buildSalesQuery(page){
   const offset = page * PAGE_SIZE;
   return `
 WITH
 quotes_dedup AS (
-  SELECT id, quotable_id
+  SELECT id, quotable_id, current
   FROM bonito_analytics.pulse_quotes
   WHERE quotable_type = 'Project' AND _peerdb_is_deleted = 0
   ORDER BY _peerdb_version DESC
@@ -136,25 +130,51 @@ line_items_dedup AS (
 )
 SELECT
   lp.project_no AS p,
-  v.erp_code AS e,
+  upperUTF8(trim(v.erp_code)) AS e,
   toDate(min(li.line_created_at)) AS d,
   round(sum(li.amount), 2) AS a,
   round(sum(CASE WHEN li.unit_price > 0 THEN li.amount / li.unit_price ELSE 0 END), 3) AS q
 FROM line_items_dedup li
-INNER JOIN quotes_dedup qd ON qd.id = li.quote_id
+INNER JOIN quotes_dedup qd ON qd.id = li.quote_id AND qd.current = true
 INNER JOIN projects_dedup lp ON lp.id = qd.quotable_id
 INNER JOIN variants_dedup v ON v.id = li.product_variant_id
-GROUP BY lp.project_no, v.erp_code
-ORDER BY lp.project_no, v.erp_code
+GROUP BY lp.project_no, upperUTF8(trim(v.erp_code))
+ORDER BY lp.project_no, upperUTF8(trim(v.erp_code))
 LIMIT ${PAGE_SIZE} OFFSET ${offset}
 `;
 }
 
-/* --- Query 2: Studio product catalog (full detail, lives per-ERP once) ---
-   Carries product_name, brand, category, backend_product_type, prices.
-   Sales rows reference ERPs that get fat-join'd on the browser. */
-const Q_STUDIO = `
+/* --- Query 2: Studio catalog — PAGINATED and FIXED ---
+   Key fixes:
+    a) Removed `status = 1` filter (killed almost everything; status enum
+       meaning is non-standard in this schema).
+    b) Walk the category parent tree up to 5 levels to find the ROOT
+       category name (Modular / Neo Modular / Studio / Services), then
+       map to type_modular / type_neo_modular / type_bonito_studio /
+       type_service for the dashboard's existing logic.
+    c) Normalize ERP to upperUTF8(trim) to match sales. */
+function buildStudioQuery(page){
+  const offset = page * PAGE_SIZE;
+  return `
 WITH
+cats_dedup AS (
+  SELECT id, name AS cat_name, parent_category_id
+  FROM bonito_analytics.pulse_commerce_product_categories
+  WHERE _peerdb_is_deleted = 0
+  ORDER BY _peerdb_version DESC
+  LIMIT 1 BY id
+),
+-- Walk the category tree up to 5 levels to find the top-level ancestor.
+cat_roots AS (
+  SELECT c1.id AS cat_id,
+         c1.cat_name AS leaf_name,
+         COALESCE(c5.cat_name, c4.cat_name, c3.cat_name, c2.cat_name, c1.cat_name) AS root_name
+  FROM cats_dedup c1
+  LEFT JOIN cats_dedup c2 ON c2.id = c1.parent_category_id
+  LEFT JOIN cats_dedup c3 ON c3.id = c2.parent_category_id
+  LEFT JOIN cats_dedup c4 ON c4.id = c3.parent_category_id
+  LEFT JOIN cats_dedup c5 ON c5.id = c4.parent_category_id
+),
 variants_dedup AS (
   SELECT id, erp_code, name AS variant_name, product_id
   FROM bonito_analytics.pulse_commerce_product_variants
@@ -167,20 +187,13 @@ products_dedup AS (
          product_brand_id, product_category_id,
          backend_product_type, bom_type, created_at, status
   FROM bonito_analytics.pulse_commerce_products
-  WHERE _peerdb_is_deleted = 0 AND status = 1
+  WHERE _peerdb_is_deleted = 0
   ORDER BY _peerdb_version DESC
   LIMIT 1 BY id
 ),
 brands_dedup AS (
   SELECT id, name AS brand_name
   FROM bonito_analytics.pulse_commerce_product_brands
-  WHERE _peerdb_is_deleted = 0
-  ORDER BY _peerdb_version DESC
-  LIMIT 1 BY id
-),
-cats_dedup AS (
-  SELECT id, name AS category_name
-  FROM bonito_analytics.pulse_commerce_product_categories
   WHERE _peerdb_is_deleted = 0
   ORDER BY _peerdb_version DESC
   LIMIT 1 BY id
@@ -206,17 +219,19 @@ mum_prices AS (
   GROUP BY variant_id
 )
 SELECT
-  v.erp_code AS erp_code,
-  p.product_name AS product_name,
-  v.variant_name AS variant_name,
+  upperUTF8(trim(v.erp_code)) AS erp_code,
+  COALESCE(p.product_name, '') AS product_name,
+  COALESCE(v.variant_name, '') AS variant_name,
   COALESCE(b.brand_name, '') AS brand,
-  COALESCE(c.category_name, '') AS category,
-  CASE p.backend_product_type
-    WHEN 46 THEN 'type_modular'
-    WHEN 47 THEN 'type_modular'
-    WHEN 48 THEN 'type_neo_modular'
-    WHEN 49 THEN 'type_bonito_studio'
-    WHEN 50 THEN 'type_service'
+  COALESCE(cr.leaf_name, '') AS category,
+  COALESCE(cr.root_name, '') AS main_category,
+  CASE lower(COALESCE(cr.root_name, ''))
+    WHEN 'modular' THEN 'type_modular'
+    WHEN 'neo modular' THEN 'type_neo_modular'
+    WHEN 'bonito studio' THEN 'type_bonito_studio'
+    WHEN 'studio' THEN 'type_bonito_studio'
+    WHEN 'services' THEN 'type_service'
+    WHEN 'service' THEN 'type_service'
     ELSE 'type_other'
   END AS default_category,
   p.backend_product_type AS backend_product_type,
@@ -228,10 +243,13 @@ SELECT
 FROM variants_dedup v
 INNER JOIN products_dedup p ON p.id = v.product_id
 LEFT JOIN brands_dedup b ON b.id = p.product_brand_id
-LEFT JOIN cats_dedup c ON c.id = p.product_category_id
+LEFT JOIN cat_roots cr ON cr.cat_id = p.product_category_id
 LEFT JOIN bng_prices bng ON bng.variant_id = v.id
 LEFT JOIN mum_prices mum ON mum.variant_id = v.id
+ORDER BY upperUTF8(trim(v.erp_code))
+LIMIT ${PAGE_SIZE} OFFSET ${offset}
 `;
+}
 
 const Q_PROJECTS_PG = `
   SELECT project_no, project_type, project_value,
@@ -240,7 +258,6 @@ const Q_PROJECTS_PG = `
   WHERE project_no IS NOT NULL
 `;
 
-/* ---------------------------- Handler ----------------------------------- */
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -258,14 +275,15 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'missing ?view= param' }) };
   }
 
+  const page = (view === 'sales' || view === 'studio')
+    ? parseInt((event.queryStringParameters || {}).page || '0', 10)
+    : 0;
+  const cacheKey = (view === 'sales' || view === 'studio') ? `${view}:p${page}` : view;
+
   const acceptEncoding = (event.headers && (event.headers['accept-encoding'] || event.headers['Accept-Encoding'])) || '';
   const wantsGzip = /\bgzip\b/.test(acceptEncoding);
 
   try {
-    const page = view === 'sales'
-      ? parseInt((event.queryStringParameters || {}).page || '0', 10)
-      : 0;
-    const cacheKey = view === 'sales' ? `sales:p${page}` : view;
     let data = getCached(cacheKey);
     let cacheHit = !!data;
 
@@ -273,7 +291,7 @@ exports.handler = async (event) => {
       if(view === 'sales'){
         data = await clickhouseQuery(buildSalesQuery(page));
       } else if(view === 'studio'){
-        data = await clickhouseQuery(Q_STUDIO);
+        data = await clickhouseQuery(buildStudioQuery(page));
       } else if(view === 'projects'){
         const client = await getPgPool().connect();
         try {
