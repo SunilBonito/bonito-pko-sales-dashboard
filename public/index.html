@@ -1659,21 +1659,22 @@ const PROJECT_TYPE_LABELS = { 1:'Turnkey', 5:'Sub', 8:'Stylist', 0:'Other', 2:'O
 // lookup for sales rows. STATE.studioRaw holds the raw API response so we
 // can key by ERP for the sales merge.
 // Paginated fetch helper. Keeps calling until a page returns fewer rows than
-// PAGE_SIZE (= last page), with a hard cap at MAX_PAGES to prevent infinite loops.
-async function fetchPaginated(view, labelPrefix){
-  const PAGE_SIZE = 40000;
-  const MAX_PAGES = 20;
+// pageSize (= last page), with a hard cap at MAX_PAGES to prevent infinite loops.
+// pageSize must match the backend's LIMIT for that view (dashboard.js has
+// SALES_PAGE_SIZE and STUDIO_PAGE_SIZE constants).
+async function fetchPaginated(view, labelPrefix, pageSize){
+  const MAX_PAGES = 30;
   const all = [];
   for(let page = 0; page < MAX_PAGES; page++){
     const rows = await fetchJson(`${view}&page=${page}`);
     all.push(...rows);
     console.log(`[PKO] ${labelPrefix} page ${page}: +${rows.length} rows (total ${all.length})`);
-    if(rows.length < PAGE_SIZE) break;
+    if(rows.length < pageSize) break;
   }
   return all;
 }
-async function fetchSalesPaginated(){ return fetchPaginated('sales', 'Sales'); }
-async function fetchStudioPaginated(){ return fetchPaginated('studio', 'Studio'); }
+async function fetchSalesPaginated(){ return fetchPaginated('sales', 'Sales', 40000); }
+async function fetchStudioPaginated(){ return fetchPaginated('studio', 'Studio', 15000); }
 
 async function loadSalesFiles(){
   // 1. Pull sales (paginated), Postgres meta, and studio in parallel.
