@@ -1614,7 +1614,8 @@ function salesRowFromApi(row, studioByErp){
   // Slim API shape: p=project_no, e=erp_code, d=pko_date, a=amount, q=qty.
   // Everything else (brand, category, product name) comes from the studio
   // catalog, which the dashboard already loads separately, keyed by ERP code.
-  const erp = row.e || '';
+  // SQL already uppercases + trims ERP on both sides; defensive upper here anyway.
+  const erp = String(row.e || '').trim().toUpperCase();
   const studio = studioByErp.get(erp) || {};
   return {
     'Project No':       row.p,
@@ -1657,23 +1658,22 @@ const PROJECT_TYPE_LABELS = { 1:'Turnkey', 5:'Sub', 8:'Stylist', 0:'Other', 2:'O
 // Studio catalog is loaded once and used both as its own dataset AND as a
 // lookup for sales rows. STATE.studioRaw holds the raw API response so we
 // can key by ERP for the sales merge.
-// Paginated sales fetch. Backend returns up to PAGE_SIZE rows per call;
-// we keep going until we get back a short page. Hard cap at 20 pages so a
-// runaway loop can't hang the browser.
-async function fetchSalesPaginated(){
+// Paginated fetch helper. Keeps calling until a page returns fewer rows than
+// PAGE_SIZE (= last page), with a hard cap at MAX_PAGES to prevent infinite loops.
+async function fetchPaginated(view, labelPrefix){
   const PAGE_SIZE = 40000;
   const MAX_PAGES = 20;
   const all = [];
   for(let page = 0; page < MAX_PAGES; page++){
-    // fetchJson appends ?view=<arg>, so passing 'sales&page=N' gives
-    // /api/dashboard?view=sales&page=N which the backend parses correctly.
-    const rows = await fetchJson(`sales&page=${page}`);
+    const rows = await fetchJson(`${view}&page=${page}`);
     all.push(...rows);
-    console.log(`[PKO] Sales page ${page}: +${rows.length} rows (total ${all.length})`);
-    if(rows.length < PAGE_SIZE) break;  // last page
+    console.log(`[PKO] ${labelPrefix} page ${page}: +${rows.length} rows (total ${all.length})`);
+    if(rows.length < PAGE_SIZE) break;
   }
   return all;
 }
+async function fetchSalesPaginated(){ return fetchPaginated('sales', 'Sales'); }
+async function fetchStudioPaginated(){ return fetchPaginated('studio', 'Studio'); }
 
 async function loadSalesFiles(){
   // 1. Pull sales (paginated), Postgres meta, and studio in parallel.
@@ -1694,7 +1694,7 @@ async function loadSalesFiles(){
   // 3. Build ERP -> studio lookup for brand/category/product_name backfill
   const studioByErp = new Map();
   for(const s of studioApi){
-    if(s.erp_code) studioByErp.set(s.erp_code, s);
+    if(s.erp_code) studioByErp.set(String(s.erp_code).trim().toUpperCase(), s);
   }
   // 4. Merge meta into each sales row, then convert to CSV-shape
   const merged = [];
@@ -1723,7 +1723,7 @@ async function init(){
     // Kick off studio fetch FIRST so loadSalesFiles() can await it for the
     // ERP->studio join. Both still happen in parallel: studio is fetched once,
     // reused by both the Studio tab and the sales rows' name/brand backfill.
-    STATE._studioReady = fetchJson('studio');
+    STATE._studioReady = fetchStudioPaginated();
     const [salesResult, studioApi] = await Promise.all([
       loadSalesFiles(),
       STATE._studioReady,
